@@ -1,0 +1,180 @@
+---
+title: "Use of ML pipeline"
+author: "Juan A. Botía"
+date: "21/01/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Introduction
+
+This document is a brief explanation on how to use a small part of the code developed in [GenoML](https://genoml.github.io/docs/overview.html). GenoML is a set of tools for working on prediction tasks in the context of genetics and disease.
+
+In particular, this document is a small introduction to how to use the pipeline in a cluster environment based on commands `qsub`, `qstat` and `qdel`. All the scripts we are going to explain are based on the UMU cluster, which is based on Torque. For more information on how these environments work is [here](https://kb.iu.edu/d/avmy). 
+
+The basic scripts from GenoML we are using here and the rest of tools (e.g. Caret) we will use are based on R, except done for [plink](https://www.cog-genomics.org/plink2/) which is an executable installed at the cluster which is helpful to allow us working with genetic data. 
+
+# Basic input data
+
+The basic GenoML pipeline is compound of the following steps. Note there might be many versions of the same pipeline depending on the inputs used, we restrict the discussion here to using GenoML with:
+
+* Genotype data: PLINK is a very widely used application for analyzing genotypic data. It can be considered the “de-facto” standard of the field. The binary PLINK format description can be accessed  at their site, for [bed](https://www.cog-genomics.org/plink2/formats#bed), [bim](https://www.cog-genomics.org/plink2/formats#bim) and [fam](https://www.cog-genomics.org/plink2/formats#fam) files. The binary PLINK format contains the same information as the flat file PLINK format but in a compressed and signifficantly more efficient form. We will intensively use this format to manipulate variants. Thus, it is convenient to briefly describe it. These three files come together. So for example, if we want to describe the genotype of our cohort we will need to enumerate the following. For each individual and each genotyped or imputed variant, we will need to indicate the genotype code (missing, homozigous for the first allele, heterozygous or homozigous for the second allele) and this goest to the bed file. The file is binary coded so is not directly readable from the terminal. Then, for each variant, we will need to describe the variant with details as chromosome, variand identifier, position, allele 1 and allele 2. This goes into the bim. This file is readable. And finally, we will need details about the cohort, including whether samples belong to a family or are single individuals, if the sample is the father or mother of another sample, sex code and phenotype value if used. This goes into the fam, which is also readable.
+
+* Other covariates or information about the individuals: these are column based plain text files, with additional information of interest about the cohort in wich each row is an individual and each column a feature of the individual. They usually come with `cov` extension.
+
+* GWAS data: we asume the reader knows about GWAS studies. Nature papers about GWAS can be found [here](https://www.nature.com/collections/jpqdqjwqkk) and an introductory tutorial is [here](https://goo.gl/bSX3De). In regard to how the results are coming to us, the results of a GWAS study does not usually follow an unified format. But they most likely will be delivered in the form of column based plain text files. We could expect a column for the SNP id, two columns for chromosome and base pair position respectively, the effect allele (i.e. also called risk, reference allele) and the non-effect allele (also called alternate and other allele), and columns for the results of the statistical test for the association. And this is when it gets complicated. Normally you would expect a beta coefficient, with a sign, odds ratio, and a p-value but in its most processed and the preferred form you would expect a z-score. And also the sample size. See this excellent [page] (http://bogdan.bioinformatics.ucla.edu/blog/tips-for-formatting-a-lot-of-gwas-summary-association-statistics-data-2/) on how to get the right values for your tool.
+
+
+# Basic pipeline
+
+Remember that we are mainly doing machine learning, so using GenoML is basically adapting a typical ML set of steps to work with genetic data. A machine learning problem can be defined as finding a good hypothesis $h$ from the space of possible hypothesis $H$, that explains the data. For us, the data will be a matrix $D_{I\times F}$ where $I$ refers to individuals (rows in our matrix) and $F$ to a set of features (columns in the matrix) describing those individuals. If what we are trying to do is a prediction task, one of the features in $F$, let us denote it with $o$ as in outcome, will be the variable to predict. This can be categorical (e.g. "disease" or "control" for disease status) or numerical (e.g. the age at onset). Normally, we will divide D based on the individuals, in $D_{I\times F}$ into a proportion for training, $D_{It\times F}$, and the rest for evaluation, $D_{Ie\times F}$. We learn the hipothesys $h$ in the training set $D_{It\times F}$ and evaluate in the evaluation set $D_{Ie\times F}$. 
+
+The basic steps we will address are in the following subsections
+
+## Step 0 preparing data for training and test
+
+In the basic pipeline, there will be three steps which are (1) Feature selection, (2) model building and (3) model evaluation and validation. But before doing any of those things, we need to decide on a strategy for how to evaluate in step 3 the model we are producing in step 2 because this indicates how to organize our data from the very begining. 
+We will usually use a [hold-out](https://en.wikipedia.org/wiki/Cross-validation_(statistics)) approach, which means we split data into training and test as we did above. 
+
+But our data, when we start, is typical genetics data so we provide facilities to deal with this fact. Let us suppose we have a folder (in my case the folder is `~/Dropbox/GenoML/data`) in which we have the three genotype files (bed/bim/fam), all them called `MyCovariates` and the covariates file, `MyCovariates.cov`. Our learning problem will be to predict the disease state of the genotyped individuals. Disease state is at the covariates file, and genotipe at the plink files. 
+
+So to define a split the data we do, from the R console
+
+```{r}
+#Uncomment the line below for using this piece of code, and the rest that follow 
+#in this document if you are in the sccges.atica.um.es cluster node
+#source("/home/users/gsit/juanbot/genoml-core/otherPackages/io.R")
+source("/Users/juanbot/Library/Caches/Cleanup\ At\ Startup/com.fetchsoftworks.Fetch/Fetch\ Temporary\ Folder\ 261/io.R")
+h = getHandlerToGenotypeData(geno="~/Dropbox/GenoML/data/MyGenotype",
+                             covs="~/Dropbox/GenoML/data/MyCovariates",
+                             id="IID",
+                             fid="FID",
+                             predictor="DISEASE",
+                             pheno="~/Dropbox/GenoML/data/MyPhenotype")
+```
+
+Note the `source` command. In your case, you have to use it with a full path to the file referring to where your `io.R` file is, under your GenoML platform, at the folder `otherPackages`. In the cluster, it is at `/home/users/gsit/juanbot/genoml-core/otherPackages/io.R`.
+
+By creating the handler, we are indicating that the bed/bim/fam files start with the value in `geno`, that the covariate file starts with the value in `covs`, that the column for the ID of each sample is `IID` at the covariates file, also for the familial ID is `FID`, that the predictor column in the same file is `DISEASE` and, for informative purposes, the phenotype file is going to be created as indicated (with an added `.pheno` extension). 
+
+And in the `h` variable be will have the handler. Now if we print it
+
+```{r}
+print(h)
+```
+
+Which means that the handler has been verified (i.e. all the files exist and all the columns at covs also exist). Note that the h variable does not hold any real genetic data. The genetic data is still at their original files. Using handlers is a good strategy for delaying the work with the actual data as much as possible because the files are huge.
+
+
+So in theory, we can now proceed to split the data, in this case into train and test. Note that this don´t work with any real genetic data neither. It only defines the sample groups. We can do it with
+
+```{r}
+h = getSamplesFromHandler(genoHandler=h,how="holdout",p=0.75)
+```
+
+so we get a random split between training and test of 75% and 25%. All the information is gathered at h, as follows
+
+```{r}
+h
+```
+
+But as you can see in your folder, the data has not yet been generated. We can actually do it with the following command but be careful how you use it. Your hard disk can be filled up very quickly. It will generate a series of files, but foremost it will generate new genotype files containing only data from the samples of the corresponding partition. In this case, only two partitions, training and test. And it will write everything to what is in workPath as folder.
+
+```{r}
+h2 = genData(genoHandler=h,workPath = "~/Dropbox/GenoML/wdata/",path2plink = "~/soft/")
+```
+
+Now we can see what we get in the new handler, which is again a wrapper, it only contains pointers to files, not actual data.
+
+```{r}
+h2
+```
+
+As you see, for the train and test partition, there are new files generated containing all the information we need to go now to step 1. An interesting feature is that you can get a fresh start with any data partition as it were your original partition so you can use this to get nested datasets. For example, you can do
+
+```{r}
+h3=getHandlerFromFold(handler=h2,type="train",index=1)
+```
+
+And h3 would be a clean handler to the train partition that you can use, again to partition it. This is actually what we will use for feature selection. 
+
+
+## Step 1 feature selection 
+
+Step 1 works on the training dataset, $D_{It\times F}$ (represented in our case by the handler h3). Once we have $D_{I_t\times F}$, i.e. h3, we can proceed with feature selection. We have just seen how to do that above.
+
+Do we really need feature selection here? We do need it indeed!! Feature selection is the process through which from $D_{I\times F}$ we generate a new $D_{I\times F'}$ such that $|F| < |F'|$, i.e. we reduce the number of columns in the matrix. If all goes well, when we learn our $h$ on the $D_{I_t\times F'}$ (i.e. the training data with selected features), the accuracy obtained when evaluating $h$ on the evaluation data with the same features will be equal or slightly lower (i.e. worse) than the accuracy we would had obtained when learning from the whole dataset (i.e. feature selection allows easier to understand models, computable models, not necessarily better models in terms of accuracy).
+
+In this case, we asume our features are, mainly, variation, most of the variation will be SNPs. And each example is an individual in our study. Typical genotype files will include more than 10 million SNPs. Clearly, we should not use all of them. Imagine a table of 10 million columns, most of them giving no information at all. It is computationally unfeasible but it is also stupid to do because a great proportion of the SNPs won't be useful to predict our phenotype.
+
+Let us suppose that first of all we partitioned all data we have into train and test. We will leave aside the test data as we will treat it as it were new data for evaluation. In consequence, we will not use it in Step 1 and when we build the model. So we repeat all the process from above, to see everything in a single code snippet:
+
+```{r,eval=FALSE}
+#Uncomment the line below for using this piece of code, and the rest that follow 
+#in this document if you are in the sccges.atica.um.es cluster node
+#source("/home/users/gsit/juanbot/genoml-core/otherPackages/io.R")
+source("/Users/juanbot/Library/Caches/Cleanup\ At\ Startup/com.fetchsoftworks.Fetch/Fetch\ Temporary\ Folder\ 261/io.R")
+h = getHandlerToGenotypeData(geno="~/Dropbox/GenoML/data/MyGenotype",
+                             covs="~/Dropbox/GenoML/data/MyCovariates",
+                             id="IID",
+                             fid="FID",
+                             predictor="DISEASE",
+                             pheno="~/Dropbox/GenoML/data/MyPhenotype")
+h = getSamplesFromHandler(genoHandler=h,how="holdout",p=0.75)
+h2 = genData(genoHandler=h,workPath = "~/Dropbox/GenoML/wdata/",path2plink = "~/soft/")
+h3=getHandlerFromFold(handler=h2,type="train",index=1)
+```
+
+So `h` will be our handler to the general dataset. And `h2` will be a handler to the general data set, but partitioned into training and test. And h3 will be a handler to the training partition that we can use as a general handler. Later on we will use h2 again to gain access to the test data so we can evaluate the model.
+
+Now, we can start working on the selection of the most relevant SNPs.
+The following code illustrates how to use PRSice with this handler, we do
+
+```{r,eval=FALSE}
+mostRelevantSNPs(handler=h3,
+                 path2plink="~/soft/",
+                 gwas="MyGWAS.tab",
+                 path2GWAS="~/Dropbox/GenoML/data/",
+                 gwasDef=" --beta --snp MarkerName --A1 Allele1 --A2 Allele2 --stat Effect --se StdErr --pvalue P-value",
+                 PRSiceexe="PRSice_mac",
+                 clumpField = "P-value",
+                 SNPcolumnatGWAS = "MarkerName",
+                 cores=4)
+```
+
+So we say that we are going to work only with the 75% partition of the data, as `h3` is the handler we use, the GWAS file and the path where to find it is also there, and `gwasDef` indicated what are the names of the columns at the GWAS file which correspond to the SNP, 1st allele, 2nd allele, effecti size, standard error and p-value of the association with the phenotype for the variant, respectively. Remind that the way to report GWAS is not standard and this parameter allows using any file without touching it. Finally, as I am using mac for building this file, my runnable for PRSice is that one. The default value is `PRSice_linux` for Linux. 
+
+This call will generate a considerable set files and logs. All the files will have a funny and long prefix but it will be very useful to perform different experiments in a single folder so we can distinguish results amongst them. In this case, the prefix for all output files will be `g-MyGenotypetrain.1-p-MyPhenotype1train-c-COVS_train1-a-NA.` which indicates the genotype file used, the phenotype file, the covariates file and whether there are additional inputs (not in this case). The results file ends with `.prsice` and it looks like this
+
+
+|Set	|Threshold	|R2	|P	|Coefficient	|Standard.Error	|Num_SNP|
+|-----|-----------|---|---|-------------|---------------|-------|
+|Base	|1e-08	|0.0383012	|2.43423e-12 |0.375131	|0.0535364	|134
+|Base	|2e-08	|0.0383368	|2.31435e-12 |0.37533	|0.0535108	|150
+|Base	|3e-08	|0.0376582	|3.49967e-12 |0.371354	|0.0533859	|156
+|Base	|4e-08	|0.0382488	|2.41186e-12 |0.37435	|0.053415	|161
+|Base	|5e-08	|0.0378049	|3.14774e-12 |0.371654	|0.0533146	|167
+|Base	|1e-07	|0.0346501	|2.37937e-11 |0.354715	|0.0530961	|181
+
+
+
+And finally, we will generate the machine learning dataset.
+
+```{r}
+fromSNPs2MLdata(handler=h3,addit="NA",path2plink="~/soft/")
+```
+
+
+
+
+
+
+
+
+
+

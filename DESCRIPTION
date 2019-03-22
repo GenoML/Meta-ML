@@ -1,0 +1,25 @@
+Package: MetaLearning
+Type: Package
+Title: Generation of a meta learning model that improves the results of a conventional machine learning one.
+Version: 0.1.0
+Authors: Rafael Jordá
+Maintainer: Rafael Jordá <rafajorda.rj@gmail.com>
+Description: This package trains genomic data to obtain various models,
+             which outputs are later used to train a new meta-model.
+             To improve the results, genotype can be added to the meta-dataset.
+Depends: R (>= 3.5.2)
+License: Creative Commons
+Encoding: UTF-8
+LazyData: true
+Imports:
+     caret,
+     plotROC,
+     magrittr,
+     data.table,
+     glmnet,
+     kernlab,
+     klaR,
+     randomForest,
+     xgboost
+RoxygenNote: 6.1.1
+ 
