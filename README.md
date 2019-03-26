@@ -1,8 +1,17 @@
 # Meta-ML
-Meta-ML is a project used to improve the accuracy of simple Machine Learning methods in genomics. This is the core package of Meta-ML. This repo is under development. 
 
-This package converts genotype data files into data prepared for Machine Learning. Once we have this data, we apply ML obtaining models that will be used to do the Meta-Learning.
-The goal is to show that the final results obtained with the Meta-Learning improve the results that a simple ML model would have on our test data.
+Meta-ML is a subproject of Geno-ML <https://genoml.github.io/>. It is an attempt to outline advanced machine learning techniques for the problems addressed in the Geno-ml platform. This is the core package of Meta-ML. This repo is under development. For any question on the pipeline please contact Rafael Jordá and Juan A. Botía (juanbotiablaya@gmail.com). 
+
+# What this package is currently for
+
+One of the functions of this package is make the user unaware that the Geno-ML works with plink files. So it basically makes it easy to deal with sampling on genotype data files so the genotype can be prepared for Machine Learning faster and easier. 
+
+But of course, we enable a multi-ml model approach to PRS with ML as the first step towards federated learning.
+We aim to develop Meta-Learning approaches to deal with multiple resources and to mimic (improve???) the results that a simple ML model would have on a single repository.
+
+The steps are:
+
+1. Generate n folds of the data, with correct case/control stratification.
 
 
 ## Install the development version from GitHub:
