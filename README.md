@@ -17,7 +17,7 @@ The steps are:
 4. For each ML model M do
      4.1. Interrogate M with all training examples
 5. Generate a meta-ML dataset that, for each individual i we have
-     5.1. ${(g(i),m1(i),m2(i),\ldots,mn(i)),status}$ 
+     5.1. {(g(i),m1(i),m2(i),...,mn(i)),status}
      5.2. status is the disease status, mj(i) is the prediction of j-th model for the ith individual
      5.3. g(i) is the SNP genotype for SNPs obtained in Step 2
 6. Generate a ML model on this data
