@@ -48,7 +48,12 @@ algs = c("lda","glm", "glmnet","nb", "xgbLinear", "earth", "svmRadial",
 basicModels = genModels(algs, handlerMLdata, imputeMissingData, workPath, gridSearch)
 ```
 
-The function `fromGenoToMLdata(workPath)` gets a handler to the genotype data. A hander is basically a file name and samples holder to work on creating sampling strategies without having to call plink each time. Plink commands are only used when the genotype data is really required. So when we call the function, no call to plink made. Then it does feature selection, and generates a ML dataset which is different for all ML models. It works as follows:
+This piece of code above starts from the whole genotype, divides it into 50% for train and 50% for test, does variant selection on the 50% training data, and using these variants, it generates a ML learning dataset including covariates, population structure PCAs and the phenotype as an outcome. 
+
+More in detail, this is how we can do that.
+
+Firstly we get a handler to the genotype data, . A hander is basically a file name and samples holder to work on creating sampling strategies without having to call plink each time. Plink commands are only used when the genotype data is really required. So when we call the function, no call to plink made. 
+
 
 ```r
   #Our first handler will always start by holding the genotype file, the covariates, the id and familial id columns
@@ -60,20 +65,23 @@ The function `fromGenoToMLdata(workPath)` gets a handler to the genotype data. A
                                predictor=predictor,
                                #With this we assure everything will be written under workPath
                                pheno=paste0(workPath,"/MyPhenotype"))
+```
+Then we partition the data into 50%, 50% as we said. And we get another handler, called `holdout` to this new form for the data. Again, the genotype plink files remains untouched yet. 
 
-  #Generate a holdout partition. The training part will be used to generate three ML models
-  #The test part will be used to evaluate the models (the handler is saved for later, not used in this script)
-  holdout = getPartitionsFromHandler(genoHandler=h,
+```r
+holdout = getPartitionsFromHandler(genoHandler=h,
                                      workPath = workPath,
                                      path2plink="",
                                      how="holdout",
                                      p=0.50)
+```
 
-  holdout = genDataFromHandler(holdout,lazy=T)
-  saveRDS(holdout,paste0(workPath,"/holdout.rds"))
-  holdout = readRDS(paste0(workPath,"/holdout.rds"))
+Now, the `genDataFromHandler()` call really generates the new plink data files. The `mostRelevantSNPs()` uses PRISice to select the variants based on the GWAS data and p-value thresholds.
 
-  handlerSNPs = mostRelevantSNPs(handler=getHandlerFromFold(handler=holdout,type="train",index=1),
+```r
+holdout = genDataFromHandler(holdout,lazy=T)
+
+handlerSNPs = mostRelevantSNPs(handler=getHandlerFromFold(handler=holdout,type="train",index=1),
                                  path2plink="",
                                  gwas="RISK_noSpain.tab",
                                  gwasDef=" --beta --snp MarkerName --A1 Allele1 --A2 Allele2 --stat Effect --se StdErr --pvalue P-value",
@@ -82,42 +90,37 @@ The function `fromGenoToMLdata(workPath)` gets a handler to the genotype data. A
                                  path2PRSice=path2PRSice,
                                  clumpField = "P-value",
                                  SNPcolumnatGWAS = "MarkerName")
+```
 
-  saveRDS(handlerSNPs,paste0(workPath,"/handlerSNPs.rds"))
-  handlerSNPs = readRDS(paste0(workPath,"/handlerSNPs.rds"))
+Now, saving the hander will allow to remember this particular feature selection results (note that PRSice is CPU intensive, but also we save that for the sake of reproducibility). Finally, we can generate the machine learning dataset that can be readily used with any learning algorithm. Note how we tell the `fromSNPs2MLdata()` method that it has to use the variantes we selected with the calls from above, through the parameter `fsHandler`.
 
-  mldatahandler = fromSNPs2MLdata(handler=holdout,
+```r
+mldatahandler = fromSNPs2MLdata(handler=holdout,
                                   addit="NA",
                                   path2plink="",
                                   fsHandler=handlerSNPs)
-
-  saveRDS(mldatahandler,paste0(workPath,"/mldatahandler.rds"))
-  mldatahandler = readRDS(paste0(workPath,"/mldatahandler.rds"))
-
-  #These are the two ML datasets generated from the genotype data and the
-  #feature selection
-  cat("Your train dataset is at",mldatahandler$train1mldata,"\n")
-  cat("Your test dataset is at",mldatahandler$test1mldata,"\n")
-
-return(mldatahandler)
+cat("Your train dataset is at",mldatahandler$train1mldata,"\n",
+"Your test dataset is at",mldatahandler$test1mldata,"\n")
 ```
 
-Then, the `genModels()` function works generating  the best possible model Caret can generate for each of the algorithms. Basically what it does is
+Once we have the training data, we can call `genModels()`. What is does is as follows. It prepares the `PHENO` data column to be used as a factor, it gets rid of the ID so it is not used in the learning phase, and imputes missing data if any.
 
 ```r
 
 train <- fread(handlerMLdata$train1mldata)
-  train$PHENO[train$PHENO == 2] <- "DISEASE"
-  train$PHENO[train$PHENO == 1] <- "CONTROL"
-  ID <- train$ID
-  train[,c("ID") := NULL]
-  preProcValues <- preProcess(train[,-1], method = c(paste(imputeMissingData,"Impute", sep = ""))) # note here we pick impute method (KNN or median),  we can also exclude near zero variance predictors and correlated predictors
-  train_processed <- predict(preProcValues, train) # here we make the preprocessed values
+train$PHENO[train$PHENO == 2] <- "DISEASE"
+train$PHENO[train$PHENO == 1] <- "CONTROL"
+ID <- train$ID
+train[,c("ID") := NULL]
+preProcValues <- preProcess(train[,-1], method = c(paste(imputeMissingData,"Impute", sep = ""))) 
+train_processed <- predict(preProcValues, train) # here we make the preprocessed values
+```
 
-  CVfolds <- 5
-  CVrepeats <- 3
-  indexPreds <- createMultiFolds(train_processed$PHENO, CVfolds, CVrepeats)
-  ctrl <- trainControl(method = "repeatedcv",
+```r
+CVfolds <- 5
+CVrepeats <- 3
+indexPreds <- createMultiFolds(train_processed$PHENO, CVfolds, CVrepeats)
+ctrl <- trainControl(method = "repeatedcv",
                        repeats = CVrepeats,
                        number = CVfolds,
                        returnResamp = "all",
