@@ -11,17 +11,19 @@ We aim to develop Meta-Learning approaches to deal with multiple resources and t
 
 The steps are:
 
-1. Generate n folds of the data, with correct case/control stratification.
-2. Use external feature selection outcome (main SNPs to use) to generate the ML dataset for each fold.
-3. Generate a ML model for each fold, keep all the models
-4. For each ML model M do
-     4.1. Interrogate M with all training examples
-5. Generate a meta-ML dataset that, for each individual i we have
-     5.1. {(g(i),m1(i),m2(i),...,mn(i)),status}
-     5.2. status is the disease status, mj(i) is the prediction of j-th model for the ith individual
-     5.3. g(i) is the SNP genotype for SNPs obtained in Step 2
-6. Generate a ML model on this data
-7. Evaluate on the test data
+1. Separate data into 50% for training, 50% for evaluation with correct case/control stratification.
+2. Do feature selection on the training 50% (main SNPs to use) to generate the global 50% ML dataset for training.
+3. Generate appropriate folds for the ML dataset of step 2, 1 for each basic ML model.
+4. For each ML algorithm and its training data chunk do
+     4.1. Use Caret to generate the best possible model
+5. For each ML model M do
+     5.1. Interrogate M with all training examples
+6. Generate a meta-ML dataset that, for each individual i we have
+     6.1. {(g(i),m1(i),m2(i),...,mn(i)),status}
+     6.2. status is the disease status, mj(i) is the prediction of j-th model for the ith individual
+     6.3. g(i) is the SNP genotype for SNPs obtained in Step 2
+7. Generate a ML model on this data
+8. Evaluate on the test data
 
 
 ## Install the development version from GitHub:
@@ -46,7 +48,59 @@ algs = c("lda","glm", "glmnet","nb", "xgbLinear", "earth", "svmRadial",
 basicModels = genModels(algs, handlerMLdata, imputeMissingData, workPath, gridSearch)
 ```
 
-The function `fromGenoToMLdata(workPath)` gets a handler to the genotype data. A hander is basically a file name and samples holder to work on creating sampling strategies without having to call plink each time. Plink commands are only used when the genotype data is really required. So when we call the function, no call to plink made.
+The function `fromGenoToMLdata(workPath)` gets a handler to the genotype data. A hander is basically a file name and samples holder to work on creating sampling strategies without having to call plink each time. Plink commands are only used when the genotype data is really required. So when we call the function, no call to plink made. Then it does feature selection, and generates a ML dataset which is different for all ML models. It works as follows:
+
+```r
+  #Our first handler will always start by holding the genotype file, the covariates, the id and familial id columns
+  #at the covariates, the variable name from which to predict how we want the phenotype file to be started
+  h = getHandlerToGenotypeData(geno=path2Geno,
+                               covs=path2Covs,
+                               id="IID",
+                               fid="FID",
+                               predictor=predictor,
+                               #With this we assure everything will be written under workPath
+                               pheno=paste0(workPath,"/MyPhenotype"))
+
+  #Generate a holdout partition. The training part will be used to generate three ML models
+  #The test part will be used to evaluate the models (the handler is saved for later, not used in this script)
+  holdout = getPartitionsFromHandler(genoHandler=h,
+                                     workPath = workPath,
+                                     path2plink="",
+                                     how="holdout",
+                                     p=0.50)
+
+  holdout = genDataFromHandler(holdout,lazy=T)
+  saveRDS(holdout,paste0(workPath,"/holdout.rds"))
+  holdout = readRDS(paste0(workPath,"/holdout.rds"))
+
+  handlerSNPs = mostRelevantSNPs(handler=getHandlerFromFold(handler=holdout,type="train",index=1),
+                                 path2plink="",
+                                 gwas="RISK_noSpain.tab",
+                                 gwasDef=" --beta --snp MarkerName --A1 Allele1 --A2 Allele2 --stat Effect --se StdErr --pvalue P-value",
+                                 path2GWAS=path2GWAS,
+                                 PRSiceexe="PRSice_linux",
+                                 path2PRSice=path2PRSice,
+                                 clumpField = "P-value",
+                                 SNPcolumnatGWAS = "MarkerName")
+
+  saveRDS(handlerSNPs,paste0(workPath,"/handlerSNPs.rds"))
+  handlerSNPs = readRDS(paste0(workPath,"/handlerSNPs.rds"))
+
+  mldatahandler = fromSNPs2MLdata(handler=holdout,
+                                  addit="NA",
+                                  path2plink="",
+                                  fsHandler=handlerSNPs)
+
+  saveRDS(mldatahandler,paste0(workPath,"/mldatahandler.rds"))
+  mldatahandler = readRDS(paste0(workPath,"/mldatahandler.rds"))
+
+  #These are the two ML datasets generated from the genotype data and the
+  #feature selection
+  cat("Your train dataset is at",mldatahandler$train1mldata,"\n")
+  cat("Your test dataset is at",mldatahandler$test1mldata,"\n")
+
+return(mldatahandler)
+```
 
 Then, the `genModels()` function works generating  the best possible model Caret can generate for each of the algorithms. Basically what it does is
 
