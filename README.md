@@ -323,6 +323,6 @@ handlerMeta$confMat = confMat
 
 # Credits
 
-The development of this suite of packages is leaded by Rafael Jordá and Juan A. Botía. The Meta-Learning part has been developed by Rafael Jorda. The conversion from genotype files to ML data has been done by Juan A. Botía.
+Part of this code has been adapted from the GenoML scripts for basic model generation. They were developed by Mike Nalls and Faraz Fahgri. The development of this suite of packages is leaded by Rafael Jordá and Juan A. Botía. The Meta-Learning part has been developed by Rafael Jorda. The conversion from genotype files to ML data has been done by Juan A. Botía.
 
 And if you use the resource please cite us, with the GitHub URL.
