@@ -76,7 +76,7 @@ holdout = getPartitionsFromHandler(genoHandler=h,
                                      p=0.50)
 ```
 
-Now, the `genDataFromHandler()` call really generates the new plink data files. The `mostRelevantSNPs()` uses PRISice to select the variants based on the GWAS data and p-value thresholds.
+Now, the `genDataFromHandler()` call really generates the new plink data files. The `mostRelevantSNPs()` uses PRISice software to select the variants based on the GWAS data and p-value thresholds.
 
 ```r
 holdout = genDataFromHandler(holdout,lazy=T)
@@ -115,6 +115,8 @@ train[,c("ID") := NULL]
 preProcValues <- preProcess(train[,-1], method = c(paste(imputeMissingData,"Impute", sep = ""))) 
 train_processed <- predict(preProcValues, train) # here we make the preprocessed values
 ```
+
+For now, we are generating 5 folds on the data, and three repeats.
 
 ```r
 CVfolds <- 5
