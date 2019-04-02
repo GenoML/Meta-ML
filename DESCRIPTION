@@ -20,7 +20,7 @@ Imports:
      kernlab,
      klaR,
      randomForest,
-     xgboost
-
+     xgboost,
+     dplyr
 RoxygenNote: 6.1.1
  

@@ -4,7 +4,7 @@
 \alias{genModels}
 \title{Title}
 \usage{
-genModels(algs, handlerMLdata, imputeMissingData, workPath, gridSearch)
+genModels(algs, handlerMLdata, imputeMissingData, gridSearch, ncores)
 }
 \arguments{
 \item{algs}{Algorithms we want to use for the obtaining of the models}
@@ -13,9 +13,9 @@ genModels(algs, handlerMLdata, imputeMissingData, workPath, gridSearch)
 
 \item{imputeMissingData}{string with the type of preprocess we want to apply to the data}
 
-\item{workPath}{String with your work path}
-
 \item{gridSearch}{int with the gridSearch for the caret train method}
+
+\item{ncores}{Number of cores you want to use for training}
 }
 \value{
 the models produced

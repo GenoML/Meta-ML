@@ -4,7 +4,8 @@
 \alias{metaLaunch}
 \title{Run the complete meta-learning pipeline}
 \usage{
-metaLaunch(workPath, includeGeno, imputeMissingData, gridSearch, nrepos)
+metaLaunch(workPath, includeGeno, imputeMissingData, gridSearch, nrepos,
+  ncores)
 }
 \arguments{
 \item{workPath}{String with your work path}
@@ -16,6 +17,8 @@ metaLaunch(workPath, includeGeno, imputeMissingData, gridSearch, nrepos)
 \item{gridSearch}{int with the gridSearch for the caret train method}
 
 \item{nrepos}{Number of repositories we are working with}
+
+\item{ncores}{Number of cores you want to use for the ML-training}
 }
 \value{
 A handler with the meta learning results
@@ -28,5 +31,5 @@ and then we obtain the best model applying ML to the train dataset, for each rep
 Once we have the best models, we run the meta learning on them to generate a more reliable result
 }
 \examples{
-handlerMeta = metaLaunch("/home/rafael", F, "median", 30, 3)
+handlerMeta = metaLaunch("/home/rafael", F, "median", 30, 3, 22)
 }
