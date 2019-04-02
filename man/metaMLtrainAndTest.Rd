@@ -4,18 +4,16 @@
 \alias{metaMLtrainAndTest}
 \title{Meta - Learning function}
 \usage{
-metaMLtrainAndTest(models, handlerMLdata, algs, trainSpeed = "ALL",
+metaMLtrainAndTest(repoModels, handlersML, alg = "xgbTree",
   workPath = "/home/rafa/MetaLearning/metaML/Modelos/",
   includeGeno = F, gridSearch = 30, imputeMissingData = "median")
 }
 \arguments{
-\item{models}{Models obtained in the function genModels}
+\item{repoModels}{List containing best models for each repository}
 
-\item{handlerMLdata}{handler that contains the *.dataForML files with the data}
+\item{handlersML}{List containing the ML-handlers associated to each one of the repositories}
 
-\item{algs}{the algorithms we are going to use to train the meta-dataset}
-
-\item{trainSpeed}{type of models we want to run in our metalearning function}
+\item{alg}{the algorithm we are going to use to train the meta-dataset}
 
 \item{workPath}{String with your work path}
 
@@ -33,5 +31,5 @@ Creating the meta machine learning data and doing
 the learning on this new dataset.
 }
 \examples{
-handlerMeta = metaMLtrainAndTest(models, handler, c("glm","nnet","rf","xgbTree"), "/home/rafael", F, 30, "median")
+handlerMeta = metaMLtrainAndTest(repoModels, handlersML, "xgbTree", "/home/rafael", F, 30, "median")
 }

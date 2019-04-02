@@ -4,13 +4,10 @@
 \alias{metaLaunch}
 \title{Run the complete meta-learning pipeline}
 \usage{
-metaLaunch(workPath, trainSpeed, includeGeno, imputeMissingData,
-  gridSearch)
+metaLaunch(workPath, includeGeno, imputeMissingData, gridSearch, nrepos)
 }
 \arguments{
 \item{workPath}{String with your work path}
-
-\item{trainSpeed}{type of models we want to run in our metalearning function, can be FAST, FURIOUS, ALL OR BOOSTED}
 
 \item{includeGeno}{bool indicating if we are going to include genotype in the meta-learning dataset}
 
@@ -18,15 +15,18 @@ metaLaunch(workPath, trainSpeed, includeGeno, imputeMissingData,
 
 \item{gridSearch}{int with the gridSearch for the caret train method}
 
-\item{handlerML}{string with the location of the handler that contains the *.dataForML files with the data}
+\item{nrepos}{Number of repositories we are working with}
 }
 \value{
 A handler with the meta learning results
 }
 \description{
-First we obtain the models calling to genModels and then
-we pass those models to the metaLearning function, which will do the rest
+In a first step, we generate two datasets, for train and test,
+and then we obtain the best model applying ML to the train dataset, for each repository.
+}
+\details{
+Once we have the best models, we run the meta learning on them to generate a more reliable result
 }
 \examples{
-handlerMeta = metaLaunch("/home/rafael", "FAST", F, "median", 30)
+handlerMeta = metaLaunch("/home/rafael", F, "median", 30, 3)
 }

@@ -1,4 +1,55 @@
 
+
+#' Generation of multiple repositories, given only one set of geno files
+#'
+#' @param workPath String with your work path
+#' @param path2Geno Path to your genotype data
+#' @param path2Covs Path to your covariates data
+#' @param path2plink Path to PLINK
+#' @param nrepos Number of repositories you want to crate
+#'
+#' @return
+#' @export
+#'
+#' @examples genPartitionFromGeno("/home/rafa/",
+#'                                "/home/users/gsit/juanbot/JUAN_SpanishGWAS/UNRELATED.SPAIN4.HARDCALLS.Rsq0.8",
+#'                                "/home/users/gsit/juanbot/JUAN_SpanishGWAS/COVS_SPAIN",
+#'                                 nrepos=3)
+genPartitionFromGeno = function(workPath,
+                                path2Geno = "/home/users/gsit/juanbot/JUAN_SpanishGWAS/UNRELATED.SPAIN4.HARDCALLS.Rsq0.8",
+                                path2Covs = "/home/users/gsit/juanbot/JUAN_SpanishGWAS/COVS_SPAIN",
+                                path2plink = "",
+                                nrepos){
+
+  lines <- system(paste0("wc -l ", path2Covs, ".cov | awk '{print $1}'"), intern = TRUE)
+  lines = strtoi(lines)
+  linesFile = floor(lines/nrepos) +1
+  command = paste0("split --numeric=1 -l ",linesFile," -a1 --additional-suffix=.cov ", path2Covs,".cov ",workPath,"/covsRepo")
+  mySystem(command)
+
+  for (i in 1:nrepos){
+    # inserting the first line of the covs file in every subdivided covs file
+    if (i!=1) {
+      firstLine = system(paste0("head -n1 ",path2Covs,".cov"), intern=TRUE)
+      command = paste0("sed -i '1i",firstLine,"' ",workPath,"/covsRepo",i,".cov")
+      mySystem(command)
+    }
+
+    command = paste0("awk '{ print $1,$2 }' ",workPath,"/covsRepo",i,".cov > ",workPath,"/idsRepo",i,".txt")
+    mySystem(command)
+
+    command = paste0("plink --bfile ", path2Geno, " --keep ",workPath,"/idsRepo",i,".txt --make-bed --out ",workPath,"/genoRepo",i)
+    mySystem(command)
+
+    command = paste0("awk '{ print $1,$2,$5 }' ",workPath,"/covsRepo",i,".cov > ",workPath,"/phenoRepo",i,".pheno")
+    mySystem(command)
+
+  }
+}
+
+
+
+
 #' Function that obtains, from the genotype data, a dataset with the data
 #' prepared for the Machine Learning part, after doing the variable selection
 #'
@@ -8,6 +59,8 @@
 #' @param predictor What you want to predict
 #' @param path2GWAS Path to your GWAS
 #' @param path2PRSICE Path to PRSICE
+#' @param path2plink Path to PLINK
+#' @param path2pheno Path to phenotype data (optional)
 #'
 #' @return A handler with the mldata
 #' @export
@@ -24,7 +77,9 @@ fromGenoToMLdata = function(workPath,
                             path2Covs = "/home/users/gsit/juanbot/JUAN_SpanishGWAS/COVS_SPAIN",
                             predictor = "DISEASE",
                             path2GWAS = "/home/users/gsit/juanbot/JUAN_SpanishGWAS/toJuanNov7th2018/",
-                            path2PRSICE = "/home/users/gsit/juanbot/genoml-core/otherPackages/"
+                            path2PRSice = "/home/users/gsit/juanbot/genoml-core/otherPackages/",
+                            path2plink = "",
+                            path2Pheno = paste0(workPath,"/MyPhenotype")
                             ){
 
   #Our first handler will always start by holding the genotype file, the covariates, the id and familial id columns
@@ -35,13 +90,13 @@ fromGenoToMLdata = function(workPath,
                                fid="FID",
                                predictor=predictor,
                                #With this we assure everything will be written under workPath
-                               pheno=paste0(workPath,"/MyPhenotype"))
+                               pheno=path2Pheno)
 
   # #Generate a holdout partition. The training part will be used to generate three ML models
   # #The test part will be used to evaluate the models (the handler is saved for later, not used in this script)
   holdout = getPartitionsFromHandler(genoHandler=h,
                                      workPath = workPath,
-                                     path2plink="",
+                                     path2plink=path2plink,
                                      how="holdout",
                                      p=0.50)
 
@@ -50,9 +105,9 @@ fromGenoToMLdata = function(workPath,
   holdout = readRDS(paste0(workPath,"/holdout.rds"))
 
   handlerSNPs = mostRelevantSNPs(handler=getHandlerFromFold(handler=holdout,type="train",index=1),
-                                 path2plink="",
+                                 path2plink=path2plink,
                                  gwas="RISK_noSpain.tab",
-                                 gwasDef=" --beta --snp MarkerName --A1 Allele1 --A2 Allele2 --stat Effect --se StdErr --pvalue P-value",
+                                 #gwasDef=" --beta --snp MarkerName --A1 Allele1 --A2 Allele2 --stat Effect --se StdErr --pvalue P-value",
                                  path2GWAS=path2GWAS,
                                  PRSiceexe="PRSice_linux",
                                  path2PRSice=path2PRSice,
@@ -64,7 +119,7 @@ fromGenoToMLdata = function(workPath,
 
   mldatahandler = fromSNPs2MLdata(handler=holdout,
                                   addit="NA",
-                                  path2plink="",
+                                  path2plink=path2plink,
                                   fsHandler=handlerSNPs)
 
   saveRDS(mldatahandler,paste0(workPath,"/mldatahandler.rds"))
@@ -81,41 +136,52 @@ fromGenoToMLdata = function(workPath,
 
 #' Run the complete meta-learning pipeline
 #'
-#' First we obtain the models calling to genModels and then
-#' we pass those models to the metaLearning function, which will do the rest
+#' In a first step, we generate two datasets, for train and test,
+#' and then we obtain the best model applying ML to the train dataset, for each repository.
+#'
+#' Once we have the best models, we run the meta learning on them to generate a more reliable result
 #'
 #' @param workPath String with your work path
-#' @param handlerML string with the location of the handler that contains the *.dataForML files with the data
-#' @param trainSpeed type of models we want to run in our metalearning function, can be FAST, FURIOUS, ALL OR BOOSTED
 #' @param includeGeno bool indicating if we are going to include genotype in the meta-learning dataset
 #' @param imputeMissingData string with the type of preprocess we want to apply to the data
 #' @param gridSearch int with the gridSearch for the caret train method
+#' @param nrepos Number of repositories we are working with
+#' @param ncores Number of cores you want to use for the ML-training
 #'
 #' @return A handler with the meta learning results
 #' @export
 #'
 #' @examples
-#' handlerMeta = metaLaunch("/home/rafael", "FAST", F, "median", 30)
-metaLaunch = function(workPath, trainSpeed, includeGeno, imputeMissingData, gridSearch){
+#' handlerMeta = metaLaunch("/home/rafael", F, "median", 30, 3, 22)
+metaLaunch = function(workPath, includeGeno, imputeMissingData, gridSearch, nrepos, ncores){
 
-  handlerMLdata = fromGenoToMLdata(workPath)
+  handlersML = list()
+  repoModels = list()
 
-  algs = c("lda","glm", "glmnet","nb", "xgbLinear", "earth", "svmRadial",
-           "rf", "bayesglm","xgbTree", "xgbDART", "C5.0Tree")
+  for(i in 1:nrepos){
 
-  models = NULL
-  models = genModels(algs, handlerMLdata, imputeMissingData, workPath, gridSearch)
+    lworkPath = paste0(workPath,"/Repo_",i)
+    dir.create(lworkPath)
+    handlersML[[paste0("Repo",i)]] = fromGenoToMLdata(lworkPath,
+                                                      path2Geno = paste0("/home/rafajorda/exps/genPartitionFromGeno/genoRepo",i),
+                                                      path2Covs = paste0("/home/rafajorda/exps/genPartitionFromGeno/covsRepo",i),
+                                                      predictor = "DISEASE",
+                                                      path2GWAS = "/home/rafajorda/packages/",
+                                                      path2PRSice = "/home/rafajorda/packages/",
+                                                      path2plink = "/home/rafajorda/packages/")
 
-  algs = NULL
-  algs[["ALL"]] = c("dnn","lda","glm", "nnet","C5.0","glmnet","nb", "xgbLinear", "earth", "svmRadial", "lasso",
-                    "ridge", "evtree", "xgbTree", "rf", "bayesglm", "xgbDART")
-  algs[["FAST"]] =  c("glm", "nb", "nnet", "rf", "dnn", "glmnet", "xgbTree", "xgbDART")
-  algs[["FURIOUS"]] = c("glm", "nb", "nnet", "rf", "dnn", "glmnet")
-  algs[["BOOSTED"]] = c("xgbLinear", "xgbTree", "xgbDART")
+    algs = c("lda","glm", "glmnet","nb", "C5.0Tree", "earth", "svmRadial",
+             "rf", "bayesglm","xgbTree", "xgbDART", "xgbLinear")
 
-  handlerMeta = NULL
-  handlerMeta <- metaMLtrainAndTest(models, handlerMLdata, algs, trainSpeed,imputeMissingData, workPath, includeGeno, gridSearch)
-  saveRDS(handlerMeta,paste0(workPath, "/handlerMeta.rds"))
+    repoModels[[paste0("Repo",i)]] = genModels(algs,
+                                               handlerMLdata = handlersML[[paste0("Repo",i)]],
+                                               imputeMissingData,
+                                               gridSearch,
+                                               ncores)
+  }
+
+  handlerMeta <- metaMLtrainAndTest(repoModels, handlersML, alg = "xgbTree", workPath, includeGeno, gridSearch, imputeMissingData)
+  saveRDS(handlerMeta,paste0(workPath, "/handlerMeta"))
 
   return(handlerMeta)
 
@@ -128,22 +194,23 @@ metaLaunch = function(workPath, trainSpeed, includeGeno, imputeMissingData, grid
 #' @param handlerMLdata handler that contains the *.dataForML files with the data
 #' @param imputeMissingData string with the type of preprocess we want to apply to the data
 #' @param gridSearch int with the gridSearch for the caret train method
-#' @param workPath String with your work path
+#' @param ncores Number of cores you want to use for training
 #'
 #' @return the models produced
 #' @export
 #'
 #' @examples
 #' models = genModels(c("glm","nnet","rf","xgbTree"), handler, "median", "/home/rafael", 30)
-genModels = function(algs, handlerMLdata, imputeMissingData, workPath, gridSearch){
+genModels = function(algs, handlerMLdata, imputeMissingData, gridSearch, ncores){
 
-  train <- fread(handlerMLdata$train1mldata)
-  train$PHENO[train$PHENO == 2] <- "DISEASE"
-  train$PHENO[train$PHENO == 1] <- "CONTROL"
-  ID <- train$ID
-  train[,c("ID") := NULL]
-  preProcValues <- preProcess(train[,-1], method = c(paste(imputeMissingData,"Impute", sep = ""))) # note here we pick impute method (KNN or median),  we can also exclude near zero variance predictors and correlated predictors
-  train_processed <- predict(preProcValues, train) # here we make the preprocessed values
+  trainRepo <- fread(handlerMLdata$train1mldata)
+  trainRepo$PHENO[trainRepo$PHENO == 2] <- "DISEASE"
+  trainRepo$PHENO[trainRepo$PHENO == 1] <- "CONTROL"
+  ID <- trainRepo$ID
+  trainRepo[,c("ID") := NULL]
+  preProcValues <- preProcess(trainRepo[,-1], method = c(paste(imputeMissingData,"Impute", sep = ""))) # note here we pick impute method (KNN or median),  we can also exclude near zero variance predictors and correlated predictors
+  train_processed <- predict(preProcValues, trainRepo) # here we make the preprocessed values
+
 
   CVfolds <- 5
   CVrepeats <- 3
@@ -157,9 +224,16 @@ genModels = function(algs, handlerMLdata, imputeMissingData, workPath, gridSearc
                        summaryFunction = twoClassSummary,
                        index = indexPreds)
 
-  models = NULL
+  ### to begin tune first begin parallel parameters
+  library("parallel")
+  library("doParallel")
+  cluster <- makeCluster(ncores) # convention to leave 1 core for OS
+  registerDoParallel(cluster)
+
+  modelsRan = NULL
   for(alg in algs){
     model = NULL
+    set.seed(1234)
     tryCatch(model <- train(PHENO ~ .,
                             data = train_processed,
                             method = alg,
@@ -168,16 +242,35 @@ genModels = function(algs, handlerMLdata, imputeMissingData, workPath, gridSearc
                             metric = "ROC")
              ,
              error = function(e){
-               cat("Error when using caret algorithm",alg,":\n")
+               #cat("Error when using caret algorithm",alg,":\n")
                print(e)
              })
 
-    if(!is.null(model))
-      saveRDS(model,paste0(workPath,"/models-",alg,".rds"))
-    models[[alg]] = model
+    if(!is.null(model)){
+      modelsRan[[alg]] = model
+    }
   }
 
-  return(models)
+  ### shut down multicore
+  stopCluster(cluster)
+  registerDoSEQ()
+
+  repo = list()
+  methodComparisons = resamples(modelsRan)
+  repo$methodComparisons = methodComparisons
+
+  ## pick best model from model compare then output plots in this case, its picked via ROC, maximizing the mean AUC across resamplings
+  ROCs <- as.matrix(methodComparisons, metric = methodComparisons$metric[1])
+  meanROCs <- as.data.frame(colMeans(ROCs, na.rm = T))
+  meanROCs$method <- rownames(meanROCs)
+  names(meanROCs)[1] <- "meanROC"
+  bestFromROC <- subset(meanROCs, meanROC == max(meanROCs$meanROC))
+  bestAlgorithm <- paste(bestFromROC[1,2])
+  bestModel <- modelsRan[[bestAlgorithm]]
+
+  repo$bestAlgorithm = bestAlgorithm
+  repo$bestModel = bestModel
+  return(repo)
 
 }
 
@@ -188,10 +281,9 @@ genModels = function(algs, handlerMLdata, imputeMissingData, workPath, gridSearc
 #' Creating the meta machine learning data and doing
 #' the learning on this new dataset.
 #'
-#' @param models Models obtained in the function genModels
-#' @param handlerMLdata handler that contains the *.dataForML files with the data
-#' @param algs the algorithms we are going to use to train the meta-dataset
-#' @param trainSpeed type of models we want to run in our metalearning function
+#' @param repoModels List containing best models for each repository
+#' @param handlersML List containing the ML-handlers associated to each one of the repositories
+#' @param alg the algorithm we are going to use to train the meta-dataset
 #' @param workPath String with your work path
 #' @param includeGeno bool indicating if we are going to include genotype in the meta-learning dataset
 #' @param gridSearch int with the gridSearch for the caret train method
@@ -201,45 +293,75 @@ genModels = function(algs, handlerMLdata, imputeMissingData, workPath, gridSearc
 #' @export
 #'
 #' @examples
-#' handlerMeta = metaMLtrainAndTest(models, handler, c("glm","nnet","rf","xgbTree"), "/home/rafael", F, 30, "median")
-metaMLtrainAndTest = function(models,
-                              handlerMLdata,
-                              algs,
-                              trainSpeed = "ALL",
+#' handlerMeta = metaMLtrainAndTest(repoModels, handlersML, "xgbTree", "/home/rafael", F, 30, "median")
+metaMLtrainAndTest = function(repoModels,
+                              handlersML,
+                              alg = "xgbTree",
                               workPath = "/home/rafa/MetaLearning/metaML/Modelos/",
                               includeGeno = F,
                               gridSearch = 30,
                               imputeMissingData = "median"){
 
+  metaSets <- vector(mode = "list")
+  testSets <- vector(mode = "list")
 
-  handlerMeta <- NULL
+  for (i in 1:length(handlersML)){
+    handlerRepo = handlersML[[paste0("Repo",i)]]
+    checkVariantNames(handlerRepo$train1mldata,handlerRepo$test1mldata)
+    dataTest <- fread(handlerRepo$test1mldata)
 
-  checkVariantNames(handlerMLdata$train1mldata,handlerMLdata$test1mldata)
-  dataTest <- fread(handlerMLdata$test1mldata)
+    #same preprocess applied to the training
+    dataTest$PHENO[dataTest$PHENO == 2] <- "DISEASE"
+    dataTest$PHENO[dataTest$PHENO == 1] <- "CONTROL"
+    ID <- dataTest$ID
+    dataTest[,c("ID") := NULL]
+    preProcValues <- preProcess(dataTest[,-1], method = c(paste(imputeMissingData,"Impute", sep = ""))) # note here we pick impute method (KNN or median),  we can also exclude near zero variance predictors and correlated predictors
+    test_processed <- predict(preProcValues, dataTest) # here we make the preprocessed values
 
-  #same preprocess applied to the training
-  dataTest$PHENO[dataTest$PHENO == 2] <- "DISEASE"
-  dataTest$PHENO[dataTest$PHENO == 1] <- "CONTROL"
-  ID <- dataTest$ID
-  dataTest[,c("ID") := NULL]
-  preProcValues <- preProcess(dataTest[,-1], method = c(paste(imputeMissingData,"Impute", sep = ""))) # note here we pick impute method (KNN or median),  we can also exclude near zero variance predictors and correlated predictors
-  test_processed <- predict(preProcValues, dataTest) # here we make the preprocessed values
+    #dataframe which will contain the predictions from each model
+    metaSet = data.frame(ID, test_processed$PHENO)
+    colnames(metaSet) <- c("ID", "PHENO")
+    testSets[[i]] <- test_processed
 
-  #dataframe which will contain the predictions from each model
-  metaSet = data.frame(ID, test_processed$PHENO)
-  colnames(metaSet) <- c("ID", "PHENO")
+    # paste predictions into the new df
+    for (j in 1:length(repoModels)){
+      aux = test_processed
+      diff1 = setdiff(colnames(repoModels[[paste0("Repo",j)]]$bestModel$trainingData[,-1]),colnames(aux))
+      if (length(diff1) > 0){
+        new_cols = data.frame(matrix(0, ncol = length(diff1), nrow = nrow(aux)))
+        colnames(new_cols) = diff1
+        aux = cbind(aux, new_cols)
+      }
+      diff2 = setdiff(colnames(aux[,-2]),colnames(repoModels[[paste0("Repo",j)]]$bestModel$trainingData))
+      if (length(diff2) > 0){
+        aux[,diff2] = NULL
+      }
 
-  for (i in 1:length(models)){
-    preds <- predict(models[[i]], newdata = test_processed)
-    colName <- paste0("Pred",i)
-    metaSet[colName] <- preds
+      preds <- predict(repoModels[[paste0("Repo",j)]]$bestModel, newdata = aux)
+      colName <- paste0("Pred",j)
+      metaSet[colName] <- preds
+    }
+
+    metaSets[[i]] <- metaSet
   }
 
-  if(includeGeno){
-    genoIdx <- tail(which(startsWith(colnames(test_processed),"PC")), n=1) +1
-    metaSet = cbind(metaSet, test_processed[,genoIdx:length(test_processed)])
-  }
+  library(dplyr)
+  metaSet = bind_rows(metaSets) # new df with predictions for all repositories
 
+  # now we add the genotype
+  # first we find common columns between SNPs in each repository
+  common_cols <- Reduce(intersect, lapply(testSets, colnames))
+  genoIdx <- tail(which(startsWith(common_cols,"PC")), n=1) +1
+  common_cols = common_cols[genoIdx:length(common_cols)]
+
+  # once we have them, we join them by rows
+  test = bind_rows(testSets)
+  geno_cols = test[,..common_cols]
+
+  # our final set is formed binding the dataframe with the predictions to the one with the genotype
+  metaSet = cbind(metaSet, geno_cols)
+
+  handlerMeta = NULL
   handlerMeta$metaSet = metaSet
   metaSet$ID = NULL
 
@@ -258,42 +380,13 @@ metaMLtrainAndTest = function(models,
   modelsRan <- NULL
   set.seed(1234)
 
-  for (model in algs[[trainSpeed]]){
-
-    modi <- train(PHENO ~ ., data = trainMD,
-                  method = model,
+  model <- train(PHENO ~ ., data = trainMD,
+                  method = alg,
                   trControl = trainControl,
                   tuneLength = gridSearch,
                   metric = "ROC")
 
-    modelsRan[[model]] <- modi
-
-  }
-
-  ### now compare best models
-  sink(file = paste(workPath, "metaML-methodPerformance.tab",sep =""), type = c("output"))
-  methodComparisons <- resamples(modelsRan)
-  print(summary(methodComparisons))
-  sink()
-  sink(file = paste(workPath, "metaML-methodTimings.tab",sep =""), type = c("output"))
-  print(methodComparisons$timings)
-  sink()
-
-  handlerMeta$modelsRan = modelsRan
-  handlerMeta$methodComparisons = resamples(modelsRan)
-
-  ## pick best model from model compare then output plots in this case, its picked via ROC, maximizing the mean AUC across resamplings
-  ROCs <- as.matrix(methodComparisons, metric = methodComparisons$metric[1])
-  meanROCs <- as.data.frame(colMeans(ROCs, na.rm = T))
-  meanROCs$method <- rownames(meanROCs)
-  names(meanROCs)[1] <- "meanROC"
-  bestFromROC <- subset(meanROCs, meanROC == max(meanROCs$meanROC))
-  bestAlgorithm <- paste(bestFromROC[1,2])
-  write.table(bestAlgorithm, file = paste(workPath, "metaML-bestModel.algorithm",sep = ""), quote = F, row.names = F, col.names = F) # exports "method" option for the best algorithm
-  bestModel <- modelsRan[[bestAlgorithm]]
-
-  handlerMeta$bestAlgorithm = bestAlgorithm
-  handlerMeta$bestModel = bestModel
+  handlerMeta$model = model
 
   metaResults <- NULL
   metaResults$PHENO <- testMD$PHENO
@@ -307,43 +400,7 @@ metaMLtrainAndTest = function(models,
   confMat <- confusionMatrix(data = as.factor(metaResults$predicted), reference = as.factor(metaResults$PHENO), positive = "DISEASE")
   handlerMeta$confMat = confMat
 
-
   return(handlerMeta)
-}
-
-
-
-checkVariantNames = function(traindata,testdata){
-
-  cat("Checking possible change of main allele between train ",traindata,
-      " and test data ",testdata,"\n")
-  train = fread(traindata, header = T)
-  test = fread(testdata,header=T)
-  snps = grep(":",colnames(train))
-  snps = colnames(train)[snps]
-  sentinel = F
-  for(snp in snps){
-    if(!(snp %in% colnames(test))){
-      cat(snp," from traning data is not at test data\n")
-      thesplit = stringr::str_split(snp,"_")
-      commonpart = thesplit[[1]][[1]]
-      letter = thesplit[[1]][[2]]
-      testpos = grep(commonpart,colnames(test))
-      wrongsnp = colnames(test)[testpos]
-      test[,testpos] = 2 - test[,..testpos]
-
-      cat("Converting ",wrongsnp," into ",paste0(commonpart,"_",letter),"\n")
-      colnames(test)[testpos] = paste0(commonpart,"_",letter)
-      sentinel = T
-    }
-  }
-  if(sentinel){
-    cat("Saving ",testdata," again to disk\n")
-    fwrite(test, file = testdata, quote = F, sep = "\t", row.names = F, na = NA)
-  }
-  else
-    cat("No need to change any variant name, identical column nanes for test/train data\n")
-
 }
 
 
