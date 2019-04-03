@@ -32,9 +32,12 @@ In this section we offer a sketch of an inductive meta-learning algorithm to be 
 The steps for the __1SmE__ algorithm are
 
 ```r
-0. Consider the problem of generating a model for predicting a polygenic risk score on a case/control set, from plink files of cases and controls. The following steps correspond to a meta-learning approach for the generation of the prediction model.
+0. Consider the problem of generating a model for predicting a polygenic risk score on a case/control set, 
+  from plink files of cases and controls. The following steps correspond to a meta-learning approach for 
+  the generation of the prediction model.
 1. Separate data into 75% for training (Tr), 25% for evaluation (Ev) with case/control stratification.
-2. Do feature selection on the Tr dataset (i.e. select the main SNPs to use). Once SNPs are selected, filter the columns of the training data keeping only those SNPs,  to generate the training dataset.
+2. Do feature selection on the Tr dataset (i.e. select the main SNPs to use). Once SNPs are selected, 
+  filter the columns of the training data keeping only those SNPs,  to generate the training dataset.
 3. Let Alg={alg1, alg2, ..., algn} the different ML techniques
   (e.g. neural networks, decision trees) we want to use for the generation of basic models.
   Generate appropriate folds on Tr for each basic ML model.
