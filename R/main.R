@@ -288,6 +288,7 @@ genModels = function(algs, handlerMLdata, imputeMissingData, gridSearch, ncores)
 #' @param includeGeno bool indicating if we are going to include genotype in the meta-learning dataset
 #' @param gridSearch int with the gridSearch for the caret train method
 #' @param imputeMissingData string with the type of preprocess we want to apply to the data
+#' @param ncores Number of cores you want to use for training
 #'
 #' @return a handler with all the meta-learning results
 #' @export
@@ -300,7 +301,8 @@ metaMLtrainAndTest = function(repoModels,
                               workPath = "/home/rafa/MetaLearning/metaML/Modelos/",
                               includeGeno = F,
                               gridSearch = 30,
-                              imputeMissingData = "median"){
+                              imputeMissingData = "median",
+                              ncores){
 
   metaSets <- vector(mode = "list")
   testSets <- vector(mode = "list")
@@ -380,11 +382,21 @@ metaMLtrainAndTest = function(repoModels,
   modelsRan <- NULL
   set.seed(1234)
 
+  ### to begin tune first begin parallel parameters
+  library("parallel")
+  library("doParallel")
+  cluster <- makeCluster(ncores) # convention to leave 1 core for OS
+  registerDoParallel(cluster)
+
   model <- train(PHENO ~ ., data = trainMD,
                   method = alg,
                   trControl = trainControl,
                   tuneLength = gridSearch,
                   metric = "ROC")
+
+  ### shut down multicore
+  stopCluster(cluster)
+  registerDoSEQ()
 
   handlerMeta$model = model
 
