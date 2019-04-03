@@ -26,19 +26,18 @@ We aim to develop MML approaches to deal with multiple resources and to mimic (i
 
 Both these algorithms can have version with genotype as predictors in the META-ML dataset. They would be written as __1SmEg__ and __nSmEg__ ML2 (meta-ml) algorithms.
 
-This would be an algorithmic approach for 1SmEg.
+## An algorithm for 1SmE
 
+In this section we offer a sketch of an inductive meta-learning algorithm to be applied on a single dataset. 
 The steps for the __1SmE__ algorithm are
 
 ```r
-1. Separate data into 50% for training, 50% for evaluation with correct
-  case/control stratification.
-2. Do feature selection on the training 50% (main SNPs to use) to generate
-  the global 50% ML dataset for training.
+0. Consider the problem of generating a model for predicting a polygenic risk score on a case/control set, from plink files of cases and controls. The following steps correspond to a meta-learning approach for the generation of the prediction model.
+1. Separate data into 75% for training (Tr), 25% for evaluation (Ev) with case/control stratification.
+2. Do feature selection on the Tr dataset (i.e. select the main SNPs to use). Once SNPs are selected, filter the columns of the training data keeping only those SNPs,  to generate the training dataset.
 3. Let Alg={alg1, alg2, ..., algn} the different ML techniques
-  (e.g. neural networks, decision trees) we want to use in the basic models.
-  Generate appropriate folds for the ML dataset of step 2, 1 for
-  each basic ML model.
+  (e.g. neural networks, decision trees) we want to use for the generation of basic models.
+  Generate appropriate folds on Tr for each basic ML model.
 4. For each ML algorithm in Alg, and its training data chunk do
 
      4.1. Use Caret + the algorithm + training data to generate
@@ -48,16 +47,17 @@ The steps for the __1SmE__ algorithm are
 
      5.1. Interrogate M with all training examples
 
-6. Generate a MML dataset that, for each subject i we generate a
+6. Generate a Meta-ML (MML) dataset such that, for each subject i in the Tr set,  we generate a
   new data example
 
      6.1. {(g(i),m1(i),m2(i),...,mn(i),status)} where status is the disease
       status for the subject, mj(i) is the prediction of j-th model
       for the i-th subject. And g(i) is the SNP genotype for SNPs obtained in
       Step 2 for the i-th individual
+      
 
 7. Let MetaAlg the technique we want to use for the meta-learner. We have then
-  to use Caret + MetaAlg + training data from point 6.1., to generate the best
+  to use Caret + MetaAlg + MML data from point 6.1., to generate the best
   possible model m
 8. Evaluate on the test data
 ```
@@ -69,6 +69,50 @@ in the eighties, check this report (Feng,C., Sutherland,A., King,S.,
   <https://doi.org/10.1080/08839519508945477>. We´re now revisiting
   these ideas: more data availability and more powerful heuristics can deliver
   a different outcome now.
+
+## An algorithm for nSmE
+
+In this section we offer the specification of an algorithm in which there are n repositories of genetic data. Possibly, these individuals will have different genetic backgrounds across repositories, they will vary in size and will have different biological covariates.
+
+Consider the problem of generating a model for predicting a polygenic risk score on a number of different repositories. Because of the particularities of the problem, we have to keep the repositories separated.  The following steps correspond to a meta-learning approach for the generation of a prediction model capable of maintaining a good error while learning particularities from all repositories segregated. As repositories are separated, the algorithm will have a concurrent part and a centralised part. We start with the concurrent part and finish gathering all results from the different runs into a single model.
+
+The steps for the __nSmE__ algorithm are
+
+```r
+0. Let n be the number of repositories (plink files + covariates + phenotype) we have
+1. Do this in parallel: 
+  for r in {1..n} do
+  1.1. Separate data of the r-th repository, Dr, into 75% for training (Tr,r), 
+    25% for evaluation (Ev,r) with case/control stratification.
+  1.2. Do feature selection on the Tr,r dataset (i.e. select the main SNPs to use). 
+    Once SNPs are selected, filter the columns of the training data keeping 
+    only those SNPs,  to generate the training dataset.
+  1.3. Let Alg={alg1, alg2, ..., algn} a set of ML techniques
+  (e.g. neural networks, decision trees) we use for the generation of basic models.   
+  1.4. Use Caret + Alg + Tr,r to generate the best possible model m.
+  1.5. Let Mml_r be the ml model for the r-th repository. Let also SNPml_r be the set 
+    of SNPs that were selected as the main SNPs from the genotype to be used in the 
+    model generation process. This parallel run returns (SNPml_r, Mml_r)
+
+2. Let {(SNPml_i, Mml_i): 1 <= i <= n} be the results gathered from all repositories. 
+  We have now to create a meta-learning dataset to learn from all repositories. 
+  2.1 For each model m in the set {(SNPml_i, Mml_i)} do
+    2.1.1. For each repository r in {1..n} do
+      Interrogate m with all individuals in Ev,r
+      Interrogate m with all individuals in Tr,r
+      Let m(g(i,r)) be the prediction of the model m on the genotype of the i-th individual of repository r.
+    end 2.1.1
+  end 2.1
+  2.2. Let us define 
+    MMLD={(m1(g(i,r)), m2(g(i,r)), m3(g(i,r)), m4(g(i,r)), p1(i), p2(i),..., pk(i),status(i)), 1 <= i <= s} 
+    to be the meta-learning dataset in which the mj(g(i,r)) elements refer to the prediction of the 
+    model created from repository j, on individual i which belongs ro repository r. 
+    The p´s are additional covariates on the individual (e.g. age, gender, genetic PCAs).
+
+3. Use Caret + Alg + MMLD to generate the final predictor
+```
+
+There are three main steps: (1) parallel repository model learning, (2) meta-learning dataset creation and (3) final model learning on meta-learning data. 
 
 
 # How to use the API to implement MML
