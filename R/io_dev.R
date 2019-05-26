@@ -231,13 +231,13 @@ getPartitionsFromHandler = function(genoHandler,
   pred <- genoHandler$Class #accessing the column given by the user
 
   if(how == "holdout"){
-    hoFold = createDataPartition(y=genoHandler$phenoDat[[h$Class]],p=p)
+    hoFold = createDataPartition(y=genoHandler$phenoDat[[pred]],p=p)
     genoHandler$folds = hoFold
     genoHandler$nfolds = 1
     genoHandler$trainFolds = NULL
     genoHandler$testFolds = NULL
     genoHandler$trainFolds$train1 = hoFold$Resample1
-    genoHandler$testFolds$test1 = (1:length(genoHandler$phenoDat[[h$Class]]))[-hoFold$Resample1]
+    genoHandler$testFolds$test1 = (1:length(genoHandler$phenoDat[[pred]]))[-hoFold$Resample1]
 
   }else{
     folds <- createFolds(y=genoHandler$phenoDat[[pred]], k=k, list = TRUE, returnTrain = FALSE)
@@ -248,7 +248,7 @@ getPartitionsFromHandler = function(genoHandler,
     testFolds <- list()  #list with the indexes saved for test in each one of the k cross-validations
     for (i in 1:genoHandler$nfolds){
       trainFolds[[paste0("train",i)]] = NULL
-      trainFolds[[paste0("train",i)]] = (1:length(genoHandler$phenoDat[[h$Class]]))[-folds[[names(folds[i])]]]
+      trainFolds[[paste0("train",i)]] = (1:length(genoHandler$phenoDat[[pred]]))[-folds[[names(folds[i])]]]
       testFolds[[paste0("test",i)]] = NULL
       testFolds[[paste0("test",i)]] = folds[[names(folds[i])]]
     }
@@ -522,7 +522,7 @@ mostRelevantSNPs = function(handler,
     workPath=paste0(dirname(handler$pheno),"/")
   path2Genotype=paste0(dirname(handler$geno),"/")
   cov = basename(handler$covs)
-
+  
   ### options passed from list on draftCommandOptions.txt
   prefix=paste0("g-",geno,"-p-",pheno,"-c-",cov,"-a-",addit)
   fprefix = paste0(workPath,"/",prefix)  ##CAMBIAR
@@ -627,7 +627,8 @@ mostRelevantSNPs = function(handler,
                                path2GWAS,
                                gwas,
                                binaryTarget,
-                               ...)
+                               gwasDef=" --beta --snp MarkerName --A1 Allele1 --A2 Allele2 --stat Effect --se StdErr --pvalue P-value")
+                               #...)
 
     cat("The command",command,"\n")
     mySystem(command)
@@ -652,7 +653,7 @@ mostRelevantSNPs = function(handler,
                      fprefix,".temp.snpsToPull2 --recode A --out ",fprefix,".reduced_genos")
     #cat("The command",command,"\n")
     mySystem(command)
-    # exports SNP list for extraction in validataion set
+    # exports SNP list for extraction in validation set
     command = paste0("cut -f 1 ",fprefix,".temp.snpsToPull2 > ",fprefix,".reduced_genos_snpList")
     #cat("The command",command,"\n")
     mySystem(command)
@@ -680,15 +681,15 @@ mostRelevantSNPs = function(handler,
 fromSNPs2MLdata = function(handler,addit,path2plink,fsHandler=NULL){
 
   #We must have done feature selection with handlerSNPs before
-  stopifnot(!is.null(handler$snpsToPull) | !is.null(fsHandler))
+  #stopifnot(!is.null(handler$snpsToPull) | !is.null(fsHandler))
   cat("Number of folds here",handler$nfolds,"\n")
+  if(is.null(handler$snpsToPull))
+    handler$snpsToPull = "void"
   if(is.null(fsHandler)){
     #Then we have to pull SNPs as default
     fsHandler = handler
   }
-  if(is.null(handler$snpsToPull))
-    handler$snpsToPull = "void"
-
+  
   if(!is.null(handler$nfolds)){
     modes = c("train","test")
   }else{
@@ -762,6 +763,7 @@ fromSNPs2MLdata = function(handler,addit,path2plink,fsHandler=NULL){
       nFiles <- genoPheno + addCov + addAddit # this specifies the number of files to merge
       print(paste("MERGING ", nFiles," FILES", sep = ""))
       genotypeInput <- paste(workPath,prefix, ".reduced_genos.raw", sep = "")
+      print(genotypeInput)
       phenoInput <- paste(workPath,pheno, ".pheno", sep = "")
       covInput <- paste(workPath,cov, ".cov", sep = "")
       additInput <- paste(workPath,addit, ".addit", sep = "")
@@ -1129,6 +1131,7 @@ checkVariantNames = function(traindata,testdata){
 
   cat("Checking possible change of main allele between train ",traindata,
       " and test data ",testdata,"\n")
+  print(traindata)
   train = fread(traindata, header = T)
   test = fread(testdata,header=T)
   snps = grep(":",colnames(train))
