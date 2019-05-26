@@ -11,7 +11,8 @@ fromGenoToMLdata(workPath,
   predictor = "DISEASE",
   path2GWAS = "/home/users/gsit/juanbot/JUAN_SpanishGWAS/toJuanNov7th2018/",
   path2PRSice = "/home/users/gsit/juanbot/genoml-core/otherPackages/",
-  path2plink = "", path2Pheno = paste0(workPath, "/MyPhenotype"))
+  path2plink = "", path2Pheno = paste0(workPath, "/MyPhenotype"),
+  snpsSpain = NULL, iter)
 }
 \arguments{
 \item{workPath}{String with your work path}
@@ -25,6 +26,8 @@ fromGenoToMLdata(workPath,
 \item{path2GWAS}{Path to your GWAS}
 
 \item{path2plink}{Path to PLINK}
+
+\item{iter}{}
 
 \item{path2PRSICE}{Path to PRSICE}
 
