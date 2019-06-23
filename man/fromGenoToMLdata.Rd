@@ -27,11 +27,13 @@ fromGenoToMLdata(workPath,
 
 \item{path2plink}{Path to PLINK}
 
-\item{iter}{}
+\item{path2Pheno}{Path to phenotype data (optional)}
+
+\item{snpsSpain}{SNPs extracted from the spanish repo that will be use to extract variables in the rest of repos}
+
+\item{iter}{Number that distinguish if we are going to select variables from the spanish dataset (iter = 1)}
 
 \item{path2PRSICE}{Path to PRSICE}
-
-\item{path2pheno}{Path to phenotype data (optional)}
 }
 \value{
 A handler with the mldata
@@ -46,5 +48,6 @@ handlerMLdata <- fromGenoToMLdata("/home/rafael",
                                   "/home/users/gsit/juanbot/JUAN_SpanishGWAS/COVS_SPAIN",
                                   "DISEASE",
                                   "/home/users/gsit/juanbot/JUAN_SpanishGWAS/toJuanNov7th2018/",
-                                  "/home/users/gsit/juanbot/genoml-core/otherPackages/")
+                                  "/home/users/gsit/juanbot/genoml-core/otherPackages/",
+                                  NULL, 1)
 }
