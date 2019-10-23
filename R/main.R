@@ -3,13 +3,15 @@
 #' Main function that applies the Meta Learning nSmE
 #' and returns the final results of the evaluation in the test set
 #'
-#' @param workPath orkPath String with your work path
-#' @param genos Vector of strings with the name of the geno files of each repo
-#' @param covs Vector of strings with the name of the covs files of each repo
-#' @param pgTest String with the name of the geno files for the cohort used in test
-#' @param pcTest String with the name of the covs files for the cohort used in test
-#' @param testFolder String with the folder in which the test results are going to be stored
+#' @param workPath String with your work path
+#' @param path2Data Path to the folder that contains the PLINK files
+#' @param path2packages Path to the folder that contains PLINK, PRSice and the GWAS 
+#' @param genosTrain List with the names of the geno files of each repo for each experiment
+#' @param covsTrain List with the names of the covs files of each repo for each experiment
+#' @param genoTest Vector with the names of the geno files for the cohort used in test
+#' @param covsTest Vector with the names of the covs files for the cohort used in test
 #' @param predictors Vector of strings with the name of the predictor variable of each repo
+#' @param pcaSET Path to the set with the PCA applied to the cohorts
 #' @param imputeMissingData string with the type of preprocess we want to apply to the data
 #' @param gridSearch int with the gridSearch for the caret train method
 #' @param ncores Number of cores you want to use for the ML-training
@@ -18,75 +20,86 @@
 #' @return the final results on the test data 
 #' @export
 #'
-#' @examples finalResults = metanSmE("/home/rafa/", genos = c("UNRELATED.SPAIN4.HARDCALLS.Rsq0.8","PDBP_V3", "HBS_V3"), 
-#'                                   covs = c( "COVS_SPAIN", "PDBP_covariates", "HBS_covariates" ),  "PPMI_V3", "PPMI_covariates.cov",
-#'                                   "median", 5, 20, 3)
-metanSmE = function(workPath, genos, covs, predictors, pgTest, pcTest, testFolder, imputeMissingData, gridSearch, ncores, nrepos){
+#' @examples
+metanSmE = function(workPath, path2Data, path2packages, genosTrain, covsTrain, genoTest, covsTest, predictors, pcaSET, imputeMissingData, gridSearch, ncores, nrepos){
   
   handlersML = list()
-  repoModels = list()
+  experts_L1 = list()
 
-
-  algsML = c("glmnet", "C5.0Tree", "earth", "svmRadial", "rf", "xgbTree")
+  # algorithms that are going to be applied in the ML part
+  algsML = c("glmnet", "C5.0Tree", "earth", "svmRadial", "rf", "xgbTree", "xgbLinear", "xgbDART")
 
   # for each repo, we obtain its mldata and its expert
   for (i in 1:nrepos){
 
     lworkPath = paste0(workPath,"/Repo_",i)
     dir.create(lworkPath)
+    
+    # generate ml handlers
     handlersML[[paste0("Repo",i)]] = fromGenoToMLdata(lworkPath,
-                                                        path2Geno = paste0("/home/rafajorda/data/",genos[i]),
-                                                        path2Covs = paste0("/home/rafajorda/data/",covs[i]),
-                                                        predictor = predictors[i],
-                                                        path2GWAS = "/home/rafajorda/packages/",
-                                                        path2PRSice = "/home/rafajorda/packages/",
-                                                        path2plink = "/home/rafajorda/packages/",
-                                                        snpsSpain = handlersML[["Repo1"]]$snpsToPull,
-                                                        iter = i)
+                                                      path2Geno = paste0(path2Data, "/", genosTrain[i]),
+                                                      path2Covs = paste0(path2Data, "/", covsTrain[i]),
+                                                      predictor = predictors[i],
+                                                      path2GWAS = path2packages,
+                                                      path2PRSice = path2packages,
+                                                      path2plink = path2packages,
+                                                      snpsSpain = handlersML[["Repo1"]]$snpsToPull,
+                                                      iter = i)
 
-    repoModels[[paste0("Repo",i)]] = genModels.nSmE(lworkPath,
+    # obtain level 1 experts
+    experts_L1[[paste0("Repo",i)]] = genModels.nSmE(lworkPath,
                                                     algsML,
                                                     handlerMLdata = handlersML[[paste0("Repo",i)]],
                                                     imputeMissingData,
                                                     gridSearch,
                                                     ncores)
 
-    saveRDS(repoModels[[paste0("Repo",i)]], paste0(lworkPath, "/repoModel",i,".rds"))
+    saveRDS(experts_L1[[paste0("Repo",i)]], paste0(lworkPath, "/expertL1-",i,".rds"))
     saveRDS(handlersML[[paste0("Repo",i)]], paste0(lworkPath, "/handlerRepo",i,".rds"))
 
   }
 
-  saveRDS(repoModels, paste0(workPath, "repoModels.rds"))
+  saveRDS(experts_L1, paste0(workPath, "experts_L1.rds"))
   saveRDS(handlersML, paste0(workPath,"handlersML.rds"))
 
   
   lworkPath = paste0(workPath,"/META/")
   dir.create(lworkPath)
 
-  algsMML = c("C5.0Tree", "rf", "xgbTree")
-  modelsMeta = NULL
-  # obtain the meta learning model for each subtype
+  algsMML = c("glmnet", "C5.0Tree", "earth", "svmRadial", "rf", "xgbTree", "xgbLinear", "xgbDART")
+  experts_L2 = NULL
+  # obtain the meta learning model (level 2 experts) for each subtype
   for (t in c("MGSA", "MG", "MSA",  "MP")){
-    modelsMeta[[t]] <- trainAndTestMML.nSmE(repoModels, handlersML, algs = algsMML, lworkPath, gridSearch, imputeMissingData, ncores, type = t)
+    experts_L2[[t]] <- trainAndTestMML.nSmE(experts_L1, 
+                                            handlersML, 
+                                            algs = algsMML, 
+                                            pcaSET = pcaSET, 
+                                            workPath = lworkPath, 
+                                            gridSearch, 
+                                            imputeMissingData, 
+                                            ncores, 
+                                            type = t)
   }
+  
+  saveRDS(experts_L2, paste0(lworkPath, "/experts_L2.rds"))
 
-  lworkPath = paste0(workPath,"/",testFolder,"/")
+  lworkPath = paste0(workPath,"/",genoTest,"/")
   dir.create(lworkPath)
   
   # generate mldata for the test repository
   handlerTest = prepareFinalTest(workPath =  lworkPath,
-                                       path2Geno = paste0("/home/rafajorda/data/",pgTest),
-                                       path2Covs = paste0("/home/rafajorda/data/",pcTest),
-                                       predictor = "PHENO_PLINK",
-                                       snpsToPull = handlersML[["Repo1"]]$snpsToPull)
-
+                                 path2Geno = paste0(path2Data, "/", genoTest),
+                                 path2Covs = paste0(path2Data, "/", covsTest),
+                                 predictor = "PHENO_PLINK",
+                                 snpsToPull = handlersML[["Repo1"]]$snpsToPull)
   
+  saveRDS(handlerTest, paste0(lworkPath, "/handler-",genoTest, ".rds"))
+
   finalResults = NULL
-  # obtain final evaluation results
+  # obtain final evaluation results in the test cohort
   for (t in c("MGSA", "MG", "MSA", "MP")){
-    #modelMeta <- readRDS(paste0(workPath,"/META/modelMeta-tipo",t,".rds"))
-    finalResults[[t]] = finalTest.nSmE(workPath = lworkPath, modelsMeta[[t]], handlerTest, repoModels, type = t)
-    saveRDS(finalResults[[t]], paste0(workPath, "/", testFolder, "/finalResults-tipo",t,".rds"))
+    finalResults[[t]] = finalTest.nSmE(workPath = lworkPath, experts_L2[[t]], handlerTest, experts_L1, pcaSET, type = t)
+    saveRDS(finalResults[[t]], paste0(lworkPath, "/finalResults-tipo",t,".rds"))
   }
 
   return(finalResults)
@@ -102,9 +115,13 @@ metanSmE = function(workPath, genos, covs, predictors, pgTest, pcTest, testFolde
 #'
 #'
 #' @param workPath String with your work path
-#' @param pgTest String with the name of the geno files for the cohort used in test
-#' @param pcTest String with the name of the covs files for the cohort used in test
-#' @param testFolder String with the folder in which the test results are going to be stored
+#' @param path2Data Path to the folder that contains the PLINK files
+#' @param path2packages Path to the folder that contains PLINK, PRSice and the GWAS 
+#' @param genoTrain String with the name of the cohort used for training
+#' @param covsTrain String with the name of the covariates used for training
+#' @param genoTest Vector with the names of the geno files for the cohort used in test
+#' @param covsTest Vector with the names of the covs files for the cohort used in test
+#' @param pcaSET Path to the set with the PCA applied to the cohorts
 #' @param imputeMissingData string with the type of preprocess we want to apply to the data
 #' @param gridSearch int with the gridSearch for the caret train method
 #' @param ncores Number of cores you want to use for the ML-training
@@ -112,70 +129,72 @@ metanSmE = function(workPath, genos, covs, predictors, pgTest, pcTest, testFolde
 #' @return the final results on the test data (PPMI)
 #' @export
 #'
-#' @examples finalResults = metanSmE("/home/rafa/", "PPMI_V3", "PPMI_covariates.cov",
-#'                                   "median", 5, 20, 3)
-meta1SmE = function(workPath, pgTest, pcTest, testFolder, imputeMissingData, gridSearch, ncores){
+#' @examples
+meta1SmE = function(workPath, path2Data, path2packages, genoTrain, covsTrain, genoTest, covsTest, pcaSET, imputeMissingData, gridSearch, ncores){
   
   lworkPath = paste0(workPath,"/dataRepo/")
   dir.create(lworkPath)
 
+  # generate ml handler from the train cohort
   handlerML = fromGenoToMLdata(lworkPath,
-                               path2Geno = "/home/rafajorda/data/UNRELATED.SPAIN4.HARDCALLS.Rsq0.8",
-                               path2Covs = "/home/rafajorda/data/COVS_SPAIN",
+                               path2Geno = paste0(path2Data, "/", genoTrain),
+                               path2Covs = paste0(path2Data, "/", covsTrain),
                                predictor = "DISEASE",
-                               path2GWAS = "/home/rafajorda/packages/",
-                               path2PRSice = "/home/rafajorda/packages/",
-                               path2plink = "/home/rafajorda/packages/",
+                               path2GWAS = path2packages,
+                               path2PRSice = path2packages,
+                               path2plink = path2packages,
                                iter = 1)
 
+  algsML = c("glmnet", "C5.0Tree", "earth", "svmRadial", "rf", "xgbTree", "xgbLinear", "xgbDART", "gbm")
 
-  saveRDS(handlerML, paste0(lworkPath, "/handler.rds"))
-
-  algsML = c("glmnet", "C5.0Tree", "earth", "svmRadial", "rf", "xgbTree")
-
-  # generate k folds and obtain their experts
-  models = genModels.1SmE(lworkPath,
+  # generate k folds and obtain their level 1 experts
+  experts_L1 = genModels.1SmE(lworkPath,
                           algs = algsML,
                           handlerMLdata = handlerML,
                           imputeMissingData,
                           gridSearch,
-                          ncores, k = 5)
+                          ncores, 
+                          k = 5)
 
-  saveRDS(models, paste0(lworkPath, "/models.rds"))
+  saveRDS(experts_L1, paste0(lworkPath, "/experts_L1.rds"))
 
   lworkPath = paste0(workPath,"/META/")
   dir.create(lworkPath)
 
-  algsMML = c("C5.0Tree", "rf", "xgbTree")
-  modelsMeta = NULL
+  algsMML = c("C5.0Tree", "glmnet", "earth", "svmRadial", "rf", "xgbTree", "xgbLinear", "xgbDART", "gbm")
+  experts_L2 = NULL
   
-  # obtain the meta learning model for each subtype
-  for (type in c("MGSA", "MG", "MSA", "MP")){
-    modelsMeta[[type]] <- trainAndTestMML.1SmE(models, handlerML, algs = algsMML, lworkPath, gridSearch, imputeMissingData, ncores, type)
-  }
-
-  
-  handlerML = readRDS(paste0(lworkPath, "/handler.rds"))
-  models = readRDS(paste0(lworkPath, "/models.rds"))
-  
-  lworkPath = paste0(workPath,"/",testFolder,"/")
-  dir.create(lworkPath)
-  
-  # generate mldata for the test repository
-  handlerTest = prepareFinalTest(workPath =  lworkPath,
-                                 path2Geno = paste0("/home/rafajorda/data/",pgTest),
-                                 path2Covs = paste0("/home/rafajorda/data/",pcTest),
-                                 predictor = "PHENO_PLINK",
-                                 snpsToPull = handlerML$snpsToPull)
-  
-  finalResults = NULL
-  # obtain final evaluation results
+  # obtain the meta learning model (level 2 experts) for each subtype
   for (t in c("MGSA", "MG", "MSA", "MP")){
-    #modelMeta <- readRDS(paste0(workPath,"/META2/modelMeta-tipo",t,".rds"))
-    finalResults[[t]] = finalTest.1SmE(workPath = lworkPath, modelsMeta[[t]], handlerTest, models, type = t)
-    saveRDS(finalResults[[t]], paste0(workPath, "/", testFolder, "/finalResults-tipo",t,".rds"))
+    experts_L2[[t]] <- trainAndTestMML.1SmE(experts_L1, handlerML, algs = algsMML, pcaSET, lworkPath, gridSearch, imputeMissingData, ncores, type=t)
   }
-  return(finalResults)
+  saveRDS(experts_L2, paste0(lworkPath, "/experts_L2.rds"))
+  
+  #handlerML = readRDS(paste0(lworkPath, "/handler.rds"))
+  #experts_L1 = readRDS(paste0(lworkPath, "/experts_L1.rds"))
+  
+  # obtain the evaluation results for each of the test cohorts
+  for(i in 1:length(genoTest)){
+    lworkPath = paste0(workPath,"/",genoTest[i],"/")
+    dir.create(lworkPath)
+    
+    # generate mldata for the test repository
+    handlerTest = prepareFinalTest(workPath =  lworkPath,
+                                   path2Geno = paste0(path2Data, "/", genoTest[i]),
+                                   path2Covs = paste0(path2Data, "/", covsTest[i]),
+                                   predictor = "PHENO_PLINK",
+                                   snpsToPull = handlerML$snpsToPull)
+    
+    saveRDS(handlerTest, paste0(lworkPath, "/handler-",genoTest[i], ".rds"))
+    
+    finalResults = NULL
+    # obtain final evaluation results
+    for (t in c("MGSA", "MG", "MSA", "MP")){
+      finalResults[[t]] = finalTest.1SmE(workPath = lworkPath, experts_L2[[t]], handlerTest, experts_L1, pcaSET, type = t)
+      saveRDS(finalResults[[t]], paste0(lworkPath, "/finalResults-tipo",t,".rds"))
+    } 
+  }
+  
 }
 
 
@@ -197,7 +216,7 @@ meta1SmE = function(workPath, pgTest, pcTest, testFolder, imputeMissingData, gri
 #' @export
 #'
 #' @examples
-#' handlerMLdata <- fromGenoToMLdata("/home/rafael",
+#' handlerMLdata = fromGenoToMLdata("/home/rafael",
 #'                                   "/home/users/gsit/juanbot/JUAN_SpanishGWAS/UNRELATED.SPAIN4.HARDCALLS.Rsq0.8",
 #'                                   "/home/users/gsit/juanbot/JUAN_SpanishGWAS/COVS_SPAIN",
 #'                                   "DISEASE",
@@ -292,7 +311,7 @@ fromGenoToMLdata = function(workPath,
 }
 
 
-#' Function that obtains the expert of one repository in Meta Learning nSmE
+#' Function that obtains the level 1 expert of one repository in Meta Learning nSmE
 #'
 #' @param workPath String with your workpath
 #' @param algs Algorithms we want to use for the obtaining of the models
@@ -319,15 +338,15 @@ genModels.nSmE = function(workPath, algs, handlerMLdata, imputeMissingData, grid
 
   CVfolds <- 5
   CVrepeats <- 3
-  indexPreds <- createMultiFolds(train_processed$PHENO, CVfolds, CVrepeats)
+  #indexPreds <- createMultiFolds(train_processed$PHENO, CVfolds, CVrepeats)
   ctrl <- trainControl(method = "repeatedcv",
                          repeats = CVrepeats,
                          number = CVfolds,
-                         returnResamp = "all",
+                         returnResamp = "final",
                          savePredictions = "all",
                          classProbs = TRUE,
-                         summaryFunction = twoClassSummary,
-                         index = indexPreds)
+                         summaryFunction = twoClassSummary)
+                         #index = indexPreds)
     
   # to begin tune first begin parallel parameters
   library("parallel")
@@ -355,8 +374,9 @@ genModels.nSmE = function(workPath, algs, handlerMLdata, imputeMissingData, grid
     if(!is.null(model)){
       models[[alg]] = model
     }
-    saveRDS(model, paste0(workPath, "/alg-",alg,".rds"))
   }
+  
+  saveRDS(models, paste0(workPath, "/models.rds"))
   
   # shut down multicore
   stopCluster(cluster)
@@ -388,7 +408,7 @@ genModels.nSmE = function(workPath, algs, handlerMLdata, imputeMissingData, grid
 
 }
 
-#' Function that generates k folds from the repo used in 1SmE and obtains the best models for each fold
+#' Function that generates k folds from the repo used in 1SmE and obtains the level 1 experts for each fold
 #'
 #' @param workPath String with your workpath
 #' @param algs Algorithms we want to use for the obtaining of the models
@@ -452,9 +472,9 @@ genModels.1SmE = function(workPath, algs, handlerMLdata, imputeMissingData, grid
         if(!is.null(model)){
           models[[alg]] = model
         }
-        saveRDS(model, paste0(workPath, "/fold",i,"-alg-",alg,".rds"))
       }
       
+      saveRDS(models, paste0(workPath, "/models-fold",i,".rds"))
       # shut down multicore
       stopCluster(cluster)
       registerDoSEQ()
@@ -496,9 +516,10 @@ genModels.1SmE = function(workPath, algs, handlerMLdata, imputeMissingData, grid
 #' Creating the meta machine learning data and doing
 #' the learning on this new dataset.
 #'
-#' @param repoModels List containing best models for each repository
+#' @param experts_L1 List containing best models for each repository
 #' @param handlersML List containing the ML-handlers associated to each one of the repositories
 #' @param algs the algorithms we are going to use to train the meta-dataset
+#' @param pcaSET Path to the set with the PCA applied to the cohorts
 #' @param workPath String with your work path
 #' @param gridSearch int with the gridSearch for the caret train method
 #' @param imputeMissingData string with the type of preprocess we want to apply to the data
@@ -509,10 +530,11 @@ genModels.1SmE = function(workPath, algs, handlerMLdata, imputeMissingData, grid
 #' @export
 #'
 #' @examples
-#' handlerMeta = metaMLtrainAndTes.nSmE(repoModels, handlersML, c("xgbTree", "rf"), "/home/rafael", F, 30, "median", "MGSA")
-trainAndTestMML.nSmE = function(repoModels,
+#' handlerMeta = metaMLtrainAndTes.nSmE(experts_L1, handlersML, c("xgbTree", "rf"), "~/pcaSET.rds", "/home/rafael", F, 30, "median", "MGSA")
+trainAndTestMML.nSmE = function(experts_L1,
                                 handlersML,
                                 algs,
+                                pcaSET,
                                 workPath = "/home/rafa/MetaLearning/metaML/Modelos/",
                                 gridSearch = 5,
                                 imputeMissingData = "median",
@@ -541,26 +563,26 @@ trainAndTestMML.nSmE = function(repoModels,
     preProcValues <- preProcess(dataRepo[,-1], method = c(paste(imputeMissingData,"Impute", sep = ""))) # note here we pick impute method (KNN or median),  we can also exclude near zero variance predictors and correlated predictors
     repo_processed <- predict(preProcValues, dataRepo) # here we make the preprocessed values
 
-    #dataframe which will contain the predictions from each model
+    # dataframe which will contain the predictions from each model
     metaSet = data.frame(ID, repo_processed$PHENO)
     colnames(metaSet) <- c("ID", "PHENO")
     predSets[[i]] <- repo_processed
     
     # remove variables in the evaluation data and not in the data used for training each expert
     # add variables set to zero present in each expert but not in the evaluation data
-    for (j in 1:length(repoModels)){
+    for (j in 1:length(experts_L1)){
       aux = repo_processed
-      diff1 = setdiff(colnames(repoModels[[paste0("Repo",j)]]$bestModel$trainingData[,-1]),colnames(aux))
+      diff1 = setdiff(colnames(experts_L1[[paste0("Repo",j)]]$bestModel$trainingData[,-1]),colnames(aux))
       if (length(diff1) > 0){
         new_cols = data.frame(matrix(0, ncol = length(diff1), nrow = nrow(aux)))
         colnames(new_cols) = diff1
         aux = cbind(aux, new_cols)
       }
-      diff2 = setdiff(colnames(aux[,-1]),colnames(repoModels[[paste0("Repo",j)]]$bestModel$trainingData))
+      diff2 = setdiff(colnames(aux[,-1]),colnames(experts_L1[[paste0("Repo",j)]]$bestModel$trainingData))
       if (length(diff2) > 0){
         aux[,diff2] = NULL
       }
-      preds <- predict(repoModels[[paste0("Repo",j)]]$bestModel, newdata = aux) # paste predictions into the metaset
+      preds <- predict(experts_L1[[paste0("Repo",j)]]$bestModel, newdata = aux) # paste predictions into the metaset
       colName <- paste0("Pred",j)
       metaSet[colName] <- preds
     }
@@ -609,7 +631,11 @@ trainAndTestMML.nSmE = function(repoModels,
   
   ID <- metaSet$ID
   metaSet$ID = NULL
-  saveRDS(metaSet, paste0(workPath, "/metaSet-tipo",type,".rds"))
+  
+  # addition of PCA to our metaSet
+  subset <- pcaSET[pcaSET$ID %in% ID, ]
+  metaSet <- cbind(metaSet, subset[,3:12])
+  colnames(metaSet)[(length(metaSet)-9):length(metaSet)]= c("PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6","PCA7", "PCA8", "PCA9", "PCA10")
 
   trainIdx<- createDataPartition(metaSet[[c("PHENO")]],p=0.75, list = FALSE, times = 1)
   trainMD<-metaSet[trainIdx,]
@@ -618,15 +644,15 @@ trainAndTestMML.nSmE = function(repoModels,
 
   CVfolds <- 5
   CVrepeats <- 3
-  indexPreds <- createMultiFolds(trainMD$PHENO, CVfolds, CVrepeats)
+  #indexPreds <- createMultiFolds(trainMD$PHENO, CVfolds, CVrepeats)
   ctrl <- trainControl(method = "repeatedcv",
                        repeats = CVrepeats,
                        number = CVfolds,
-                       returnResamp = "all",
+                       returnResamp = "final",
                        savePredictions = "all",
                        classProbs = TRUE,
-                       summaryFunction = twoClassSummary,
-                       index = indexPreds)
+                       summaryFunction = twoClassSummary)
+                       #index = indexPreds)
 
   
   
@@ -657,7 +683,6 @@ trainAndTestMML.nSmE = function(repoModels,
     if(!is.null(model)){
       models[[alg]] = model
     }
-    saveRDS(model, paste0(workPath, "/alg-",alg,".rds"))
   }
 
   # shut down multicore
@@ -673,13 +698,12 @@ trainAndTestMML.nSmE = function(repoModels,
   names(meanROCs)[1] <- "meanROC"
   bestFromROC <- subset(meanROCs, meanROC == max(meanROCs$meanROC))
   bestAlgorithm <- paste(bestFromROC[1,2])
-  bestModel <- models[[bestAlgorithm]]
+  expert_L2 <- models[[bestAlgorithm]]
   
-  model <- bestModel
   metaResults <- NULL
   metaResults$PHENO <- testMD$PHENO
-  metaResults$predicted <- predict(model, testMD)
-  metaResults$probDisease <- predict(model, testMD, type = "prob")[2]
+  metaResults$predicted <- predict(expert_L2, testMD)
+  metaResults$probDisease <- predict(expert_L2, testMD, type = "prob")[2]
   metaResults$diseaseBinomial <- ifelse(testMD$PHENO == "DISEASE", 1, 0)
   metaResults$predictedBinomial <- ifelse(metaResults$predicted == "DISEASE", 1, 0)
   #write.table(metaResults, file = paste(workPath, "metaMLPredictions.tab",sep =""), quote = F, sep = "\t", row.names = F)
@@ -689,11 +713,12 @@ trainAndTestMML.nSmE = function(repoModels,
   metaResults$methodComparisons = methodComparisons
   metaResults$bestAlgorithm = bestAlgorithm
 
-  metaSet$ID = ID 
-  saveRDS(model, paste0(workPath,"/modelMeta-tipo",type,".rds"))
+  metaSet$ID = ID
+  saveRDS(metaSet, paste0(workPath, "/metaSet-tipo",type,".rds"))
+  saveRDS(expert_L2, paste0(workPath,"/expert_L2-tipo",type,".rds"))
   saveRDS(metaResults, paste0(workPath,"/metaResults-tipo",type,".rds"))
   
-  return(model)
+  return(expert_L2)
 }
 
 
@@ -703,9 +728,10 @@ trainAndTestMML.nSmE = function(repoModels,
 #' Creating the meta machine learning data and doing
 #' the learning on this new dataset.
 #'
-#' @param models Experts obtained from the function genModels
+#' @param experts_L1 Experts obtained from the function genModels
 #' @param handlerMLdata handler that contains the *.dataForML files with the data
 #' @param algs the algorithms we are going to use to train the meta-dataset
+#' @param pcaSET Path to the set with the PCA applied to the cohorts
 #' @param workPath String with your work path
 #' @param gridSearch int with the gridSearch for the caret train method
 #' @param imputeMissingData string with the type of preprocess we want to apply to the data
@@ -716,10 +742,11 @@ trainAndTestMML.nSmE = function(repoModels,
 #' @export
 #'
 #' @examples
-#' handlerMeta = metaMLtrainAndTest.1SmE(repoModels, handlersML, c("xgbTree", "rf"), "/home/rafael", F, 30, "median", "MG")
-trainAndTestMML.1SmE = function(models,
+#' handlerMeta = metaMLtrainAndTest.1SmE(experts_L1, handlersML, c("xgbTree", "rf"), "~/pcaSET.rds", "/home/rafael", F, 30, "median", "MG")
+trainAndTestMML.1SmE = function(experts_L1,
                                 handlerMLdata,
                                 algs,
+                                pcaSET,
                                 workPath = "/home/rafa/MetaLearning/metaML/Modelos/",
                                 gridSearch = 30,
                                 imputeMissingData = "median",
@@ -745,8 +772,8 @@ trainAndTestMML.1SmE = function(models,
   colnames(metaSet) <- c("ID", "PHENO")
 
   # obtain predictions from each expert in our evaluation data
-  for (i in 1:length(models)){
-    preds <- predict(models[[i]]$bestModel, newdata = total_processed)
+  for (i in 1:length(experts_L1)){
+    preds <- predict(experts_L1[[i]]$bestModel, newdata = total_processed)
     colName <- paste0("Pred",i)
     metaSet[colName] <- preds
   }
@@ -774,7 +801,12 @@ trainAndTestMML.1SmE = function(models,
 
   ID <- metaSet$ID
   metaSet$ID = NULL
-  saveRDS(metaSet, paste0(workPath, "/metaSet-tipo",type,".rds"))
+  
+  # addition of PCA to our metaSet
+  subset <- pcaSET[pcaSET$ID %in% ID, ]
+  metaSet <- cbind(metaSet, subset[,3:12])
+  colnames(metaSet)[(length(metaSet)-9):length(metaSet)]= c("PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6","PCA7", "PCA8", "PCA9", "PCA10")
+  
   #separate the new dataframe into train and test
   trainIdx<- createDataPartition(metaSet[[c("PHENO")]],p=0.75, list = FALSE, times = 1)
   trainMD<-metaSet[trainIdx,]
@@ -835,14 +867,12 @@ trainAndTestMML.1SmE = function(models,
   names(meanROCs)[1] <- "meanROC"
   bestFromROC <- subset(meanROCs, meanROC == max(meanROCs$meanROC))
   bestAlgorithm <- paste(bestFromROC[1,2])
-  bestModel <- models[[bestAlgorithm]]
+  expert_L2 <- models[[bestAlgorithm]]
   
-  model <- bestModel
-
   metaResults <- NULL
   metaResults$PHENO <- testMD$PHENO
-  metaResults$predicted <- predict(model, testMD)
-  metaResults$probDisease <- predict(model, testMD, type = "prob")[2]
+  metaResults$predicted <- predict(expert_L2, testMD)
+  metaResults$probDisease <- predict(expert_L2, testMD, type = "prob")[2]
   metaResults$diseaseBinomial <- ifelse(testMD$PHENO == "DISEASE", 1, 0)
   metaResults$predictedBinomial <- ifelse(metaResults$predicted == "DISEASE", 1, 0)
   #write.table(metaResults, file = paste(workPath, "metaMLPredictions.tab",sep =""), quote = F, sep = "\t", row.names = F)
@@ -853,9 +883,10 @@ trainAndTestMML.1SmE = function(models,
   metaResults$bestAlgorithm = bestAlgorithm
 
   metaSet$ID = ID
-  saveRDS(model, paste0(workPath,"/modelMeta-tipo",type,".rds"))
+  saveRDS(metaSet, paste0(workPath, "/metaSet-tipo",type,".rds"))
+  saveRDS(expert_L2, paste0(workPath,"/expert_L2-tipo",type,".rds"))
   saveRDS(metaResults, paste0(workPath,"/metaResults-tipo",type,".rds"))
-  return(model)
+  return(expert_L2)
 
 
 
@@ -929,17 +960,18 @@ prepareFinalTest = function(workPath =  "/home/rafajorda/exps2/PPMI/",
 #' Function that obtains the prediction in the test repository in the Meta Learning nSmE.
 #'
 #' @param workPath String with your work path 
-#' @param modelMeta Model returned by the MML nSmE
+#' @param expert_L2 Expert returned by the MML nSmE
 #' @param handlerTest Handler with the mldata of the test set
-#' @param repoModels Experts used in the generation of the metaset
+#' @param experts_L1 Experts used in the generation of the metaset
 #' @param type Subtype of MML that will be applied to obtain the prediction
+#' @param pcaSET Path to the set with the PCA applied to the cohorts
 #' @param imputeMissingData string with the type of preprocess we want to apply to the data
 #'
 #' @return
 #' @export
 #'
-#' @examples finalResults = finalTest.nSmE("/home/rafa/", modelMeta, handler, repoModels, "MGSA", "median")
-finalTest.nSmE = function(workPath, modelMeta, handlerTest, repoModels, type, imputeMissingData = "median"){
+#' @examples finalResults = finalTest.nSmE("/home/rafa/", expert_L2, handler, experts_L1, "MGSA", "~/pcaSET.rds", "median")
+finalTest.nSmE = function(workPath, expert_L2, handlerTest, experts_L1, type, pcaSET, imputeMissingData = "median"){
   
   dataFinal <- as.data.frame(fread(handlerTest$train1mldata))
 
@@ -956,19 +988,19 @@ finalTest.nSmE = function(workPath, modelMeta, handlerTest, repoModels, type, im
   colnames(metaSet) <- c("ID", "PHENO")
   
   # obtain the metaset for the test data
-  for (j in 1:length(repoModels)){
+  for (j in 1:length(experts_L1)){
     aux = final_processed
-    diff1 = setdiff(colnames(repoModels[[paste0("Repo",j)]]$bestModel$trainingData[,-1]),colnames(aux))
+    diff1 = setdiff(colnames(experts_L1[[paste0("Repo",j)]]$bestModel$trainingData[,-1]),colnames(aux))
     if (length(diff1) > 0){
       new_cols = data.frame(matrix(0, ncol = length(diff1), nrow = nrow(aux)))
       colnames(new_cols) = diff1
       aux = cbind(aux, new_cols)
     }
-    diff2 = setdiff(colnames(aux[,-1]),colnames(repoModels[[paste0("Repo",j)]]$bestModel$trainingData))
+    diff2 = setdiff(colnames(aux[,-1]),colnames(experts_L1[[paste0("Repo",j)]]$bestModel$trainingData))
     if (length(diff2) > 0){
       aux[,diff2] = NULL
     }
-    preds <- predict(repoModels[[paste0("Repo",j)]]$bestModel, newdata = aux)
+    preds <- predict(experts_L1[[paste0("Repo",j)]]$bestModel, newdata = aux)
     colName <- paste0("Pred",j)
     metaSet[colName] <- preds
   }
@@ -1000,17 +1032,22 @@ finalTest.nSmE = function(workPath, modelMeta, handlerTest, repoModels, type, im
   
   ID <- metaSet$ID
   metaSet$ID = NULL
+  
+  # addition of PCA to our metaSet
+  subset <- pcaSET[pcaSET$ID %in% ID, ]
+  metaSet <- cbind(metaSet, subset[,3:12])
+  colnames(metaSet)[(length(metaSet)-9):length(metaSet)]= c("PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6","PCA7", "PCA8", "PCA9", "PCA10")
   aux = metaSet
   
   # remove variables in the metaset and not in the data used for training the MML model
   # add variables set to zero present in the MML model but not in the data
-  diff1 = setdiff(colnames(modelMeta$trainingData[,-1]),colnames(aux))
+  diff1 = setdiff(colnames(expert_L2$trainingData[,-1]),colnames(aux))
   if (length(diff1) > 0){
     new_cols = data.frame(matrix(0, ncol = length(diff1), nrow = nrow(aux)))
     colnames(new_cols) = diff1
     aux = cbind(aux, new_cols)
   }
-  diff2 = setdiff(colnames(aux[,-1]),colnames(modelMeta$trainingData))
+  diff2 = setdiff(colnames(aux[,-1]),colnames(expert_L2$trainingData))
   if (length(diff2) > 0){
     aux[,diff2] = NULL
     
@@ -1022,8 +1059,8 @@ finalTest.nSmE = function(workPath, modelMeta, handlerTest, repoModels, type, im
   # obtain final results
   finalResults = NULL
   finalResults$PHENO <- metaSet$PHENO
-  finalResults$predFinal <- predict(modelMeta, metaSet)
-  finalResults$probDisease <- predict(modelMeta, metaSet, type = "prob")[2]
+  finalResults$predFinal <- predict(expert_L2, metaSet)
+  finalResults$probDisease <- predict(expert_L2, metaSet, type = "prob")[2]
   finalResults$diseaseBinomial <- ifelse(metaSet$PHENO == "DISEASE", 1, 0)
   finalResults$predictedBinomial <- ifelse(finalResults$predFinal == "DISEASE", 1, 0)
   
@@ -1038,17 +1075,18 @@ finalTest.nSmE = function(workPath, modelMeta, handlerTest, repoModels, type, im
 #' Function that obtains the prediction in the test repository in the Meta Learning 1SmE.
 #'
 #' @param workPath String with your work path 
-#' @param modelMeta Model returned by the MML nSmE
+#' @param expert_L2 Expert returned by the MML nSmE
 #' @param handlerTest Handler with the mldata of the test set
-#' @param models Experts used in the generation of the metaset
+#' @param experts_L1 Experts used in the generation of the metaset
 #' @param type Subtype of MML that will be applied to obtain the prediction
+#' @param pcaSET Path to the set with the PCA applied to the cohorts
 #' @param imputeMissingData string with the type of preprocess we want to apply to the data
 #'
 #' @return
 #' @export
 #'
-#' @examples finalResults = finalTest.nSmE("/home/rafa/", modelMeta, handler, models, "MGSA", "median")
-finalTest.1SmE = function(workPath, modelMeta, handlerTest, models, type, imputeMissingData = "median"){
+#' @examples finalResults = finalTest.nSmE("/home/rafa/", expert_L2, handler, experts_L1, "MGSA", "~/pcaSET.rds", "median")
+finalTest.1SmE = function(workPath, expert_L2, handlerTest, experts_L1, type, pcaSET, imputeMissingData = "median"){
   
   dataFinal <- as.data.frame(fread(handlerTest$train1mldata))
   
@@ -1068,18 +1106,18 @@ finalTest.1SmE = function(workPath, modelMeta, handlerTest, models, type, impute
   aux = final_processed
   # remove variables in the test data and not in the data used for training each expert 
   # add variables set to zero present in each expert but not in the test data
-  diff1 = setdiff(colnames(models[[1]]$bestModel$trainingData[,-1]),colnames(aux)) # each expert has the same variables, so we use the first one, for example
+  diff1 = setdiff(colnames(experts_L1[[1]]$bestModel$trainingData[,-1]),colnames(aux)) # each expert has the same variables, so we use the first one, for example
   if (length(diff1) > 0){
     new_cols = data.frame(matrix(0, ncol = length(diff1), nrow = nrow(aux)))
     colnames(new_cols) = diff1
     aux = cbind(aux, new_cols)
   }
-  diff2 = setdiff(colnames(aux[,-1]),colnames(models[[1]]$bestModel$trainingData))
+  diff2 = setdiff(colnames(aux[,-1]),colnames(experts_L1[[1]]$bestModel$trainingData))
   if (length(diff2) > 0){
     aux[,diff2] = NULL
   }
-  for (i in 1:length(models)){
-    preds <- predict(models[[i]]$bestModel, newdata = aux)
+  for (i in 1:length(experts_L1)){
+    preds <- predict(experts_L1[[i]]$bestModel, newdata = aux)
     colName <- paste0("Pred",i)
     metaSet[colName] <- preds
   }
@@ -1090,48 +1128,50 @@ finalTest.1SmE = function(workPath, modelMeta, handlerTest, models, type, impute
     cols = cols[!startsWith(cols,"PC")]
     all_cols = final_processed[,cols]
     metaSet = cbind(metaSet, all_cols)
-  }
-  else if (type == "MG"){ # we add geno
+  }else if (type == "MG"){ # we add geno
     genoIdx <- tail(which(startsWith(colnames(final_processed),"PC")), n=1) +1
     metaSet = cbind(metaSet, final_processed[,genoIdx:length(final_processed)])
-  }
-  else if (type == "MSA"){ # we add age and sex
+  }else if (type == "MSA"){ # we add age and sex
     genoIdx <- tail(which(startsWith(colnames(final_processed),"PC")), n=1) +1
     common_cols = colnames(final_processed[,1:(genoIdx-1)])
     common_cols = common_cols[!startsWith(common_cols,"PC")]
     common_cols = common_cols[!common_cols %in% c("PHENO")]
     
     metaSet = cbind(metaSet, final_processed[,common_cols])
-  }
-  else print("We don't add any extra features to the metaset")
+  }else print("We don't add any extra features to the metaset")
   
-  saveRDS(metaSet, paste0(workPath, "/metaSet-ANTES-FINAL-tipo",type,".rds"))
+  #saveRDS(metaSet, paste0(workPath, "/metaSet-ANTES-FINAL-tipo",type,".rds"))
 
   ID <- metaSet$ID
   metaSet$ID = NULL
+  
+  # addition of PCA to our metaSet
+  subset <- pcaSET[pcaSET$ID %in% ID, ]
+  metaSet <- cbind(metaSet, subset[,3:12])
+  colnames(metaSet)[(length(metaSet)-9):length(metaSet)]= c("PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6","PCA7", "PCA8", "PCA9", "PCA10")
   aux = metaSet
   
   # remove variables in the metaset and not in the data used for training the MML model
   # add variables set to zero present in the MML model but not in the data
-  diff1 = setdiff(colnames(modelMeta$trainingData[,-1]),colnames(aux))
+  diff1 = setdiff(colnames(expert_L2$trainingData[,-1]),colnames(aux))
   if (length(diff1) > 0){
     new_cols = data.frame(matrix(0, ncol = length(diff1), nrow = nrow(aux)))
     colnames(new_cols) = diff1
     aux = cbind(aux, new_cols)
   }
-  diff2 = setdiff(colnames(aux[,-1]),colnames(modelMeta$trainingData))
+  diff2 = setdiff(colnames(aux[,-1]),colnames(expert_L2$trainingData))
   if (length(diff2) > 0){
     aux[,diff2] = NULL
   }
   
-  metaSet = aux
-  saveRDS(metaSet, paste0(workPath, "/metaSetFINAL-tipo",type,".rds"))
   
+  metaSet = aux
+  saveRDS(metaSet, paste0(workPath, "/metaSet-tipo",type,".rds"))
   # obtain final results
   finalResults = NULL
   finalResults$PHENO <- metaSet$PHENO
-  finalResults$predFinal <- predict(modelMeta, metaSet)
-  finalResults$probDisease <- predict(modelMeta, metaSet, type = "prob")[2]
+  finalResults$predFinal <- predict(expert_L2, metaSet)
+  finalResults$probDisease <- predict(expert_L2, metaSet, type = "prob")[2]
   finalResults$diseaseBinomial <- ifelse(metaSet$PHENO == "DISEASE", 1, 0)
   finalResults$predictedBinomial <- ifelse(finalResults$predFinal == "DISEASE", 1, 0)
   

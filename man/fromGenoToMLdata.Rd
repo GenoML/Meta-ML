@@ -43,7 +43,7 @@ Function that obtains, from the genotype data, a dataset with the data
 prepared for the Machine Learning part, after doing the variable selection
 }
 \examples{
-handlerMLdata <- fromGenoToMLdata("/home/rafael",
+handlerMLdata = fromGenoToMLdata("/home/rafael",
                                   "/home/users/gsit/juanbot/JUAN_SpanishGWAS/UNRELATED.SPAIN4.HARDCALLS.Rsq0.8",
                                   "/home/users/gsit/juanbot/JUAN_SpanishGWAS/COVS_SPAIN",
                                   "DISEASE",
